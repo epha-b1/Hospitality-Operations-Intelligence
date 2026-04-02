@@ -1,0 +1,37 @@
+import request from 'supertest';
+import app from '../src/app';
+
+describe('Slice 1 — Health API', () => {
+  test('GET /health returns 200 with status ok', async () => {
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.timestamp).toBeDefined();
+  });
+
+  test('GET /nonexistent returns 404', async () => {
+    const res = await request(app).get('/nonexistent');
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('NOT_FOUND');
+  });
+
+  test('X-Trace-Id header is present on every response', async () => {
+    const res = await request(app).get('/health');
+    expect(res.headers['x-trace-id']).toBeDefined();
+    expect(res.headers['x-trace-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
+  });
+
+  test('404 response also includes X-Trace-Id', async () => {
+    const res = await request(app).get('/does-not-exist');
+    expect(res.status).toBe(404);
+    expect(res.headers['x-trace-id']).toBeDefined();
+  });
+
+  test('error response includes traceId in body', async () => {
+    const res = await request(app).get('/does-not-exist');
+    expect(res.body.traceId).toBeDefined();
+    expect(res.body.statusCode).toBe(404);
+  });
+});

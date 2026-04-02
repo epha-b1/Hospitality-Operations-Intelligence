@@ -63,13 +63,13 @@
 
 ---
 
-## 7. SHA-256 Deduplication — Scope: Per User or Global?
+## 7. SHA-256 Deduplication — Scope: Per Group or Global?
 
-**Question:** When a file's SHA-256 matches an existing file, is deduplication global (any user) or per-group?
+**Question:** When a file's SHA-256 matches an existing file, is deduplication global (any user) or per-group? Global dedup with a single `group_id` FK would block the same file being uploaded to two different groups.
 
-**Assumption:** Deduplication is global for storage efficiency, but API behavior must avoid cross-group information leakage.
+**Assumption:** Deduplication is scoped per-group (`UNIQUE(sha256, group_id)`), not global. This avoids cross-group information leakage and allows the same file content in multiple groups without a join table.
 
-**Solution:** `files.sha256` has a unique index. On hash match, create/ensure group association and return a generic success payload that does not disclose whether bytes already existed in another group. Access remains enforced by group membership checks.
+**Solution:** On upload, check if the same hash already exists in the same group — if so, return the existing file record. Different groups can independently store files with the same content.
 
 ---
 
@@ -171,4 +171,35 @@
 
 **Assumption:** Idempotency keys are scoped by actor + operation + target resource and retained for 24 hours.
 
-**Solution:** Use a dedicated `idempotency_keys` table (`key`, `actor_id`, `operation`, `resource_scope`, `request_hash`, `response_snapshot`, `expires_at`). On duplicate key with same request hash, return stored response; mismatched hash returns 409. Avoid storing update idempotency directly on `itinerary_items` rows.
+**Solution:** Use a dedicated `idempotency_keys` table (`key`, `actor_id`, `operation`, `resource_scope`, `request_hash`, `response_snapshot`, `expires_at`). On duplicate key with same request hash, return stored response; mismatched hash returns 409. The `idempotency_key` column on `itinerary_items` is retained for create-only dedup (UNIQUE constraint catches duplicate inserts), while the `idempotency_keys` table handles update idempotency with response replay.
+
+---
+
+## 18. Registration Default Role — What Role Does a New User Get?
+
+**Question:** The prompt defines four roles (hotel_admin, manager, analyst, member) but doesn't specify what role a self-registered user receives.
+
+**Assumption:** New users register with the `member` role by default. Only a `hotel_admin` can promote users to other roles. The first user in the system is seeded as `hotel_admin` — self-registration never grants admin/manager/analyst.
+
+**Solution:** `POST /auth/register` always sets `role = 'member'`. Add `PATCH /accounts/:userId/role` (hotel_admin only) for role assignment. Seeder creates the initial admin user.
+
+---
+
+## 19. Rate Limiting — What Are the Limits?
+
+**Question:** The architecture mentions rate-limit middleware but the prompt doesn't specify thresholds.
+
+**Assumption:** Per-IP rate limit: 100 requests/minute for general endpoints, 10 requests/minute for auth endpoints (login/register) to mitigate brute force. Per-user rate limit: 200 requests/minute.
+
+**Solution:** `rate-limit.middleware.ts` using `express-rate-limit` with separate limiters for auth and general routes. Returns 429 with `Retry-After` header when exceeded.
+
+---
+
+## 20. Account Deletion — What Happens to Group Data?
+
+**Question:** When a user soft-deletes their account, what happens to groups they own, their group memberships, files they uploaded, and itinerary items they created?
+
+**Assumption:** Soft-deleted users are removed from all groups. If the deleted user is a group owner, ownership transfers to the next admin, or if none exists, the group is archived. Files and itinerary items created by the user remain (attributed to a "deleted user" placeholder). Face enrollments are deactivated.
+
+**Solution:** Account deletion triggers a cascade: deactivate face enrollments, remove group memberships, transfer or archive owned groups, and log the full operation in audit_logs. The user row retains `deleted_at` for data retention.
+

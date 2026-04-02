@@ -46,6 +46,7 @@ Express HTTP Server (port 3000)
 | Scheduling | node-cron |
 | API docs | Swagger UI (swagger-ui-express) |
 | Logging | Winston with structured JSON |
+| ZIP archive | archiver |
 | Excel/CSV | exceljs + csv-parse |
 | File upload | multer |
 | Container | Docker + docker-compose |
@@ -90,6 +91,7 @@ users
   zip             varchar(10)
   tax_invoice_title varchar(255)
   preferred_currency varchar(3)                  -- ISO 4217
+  pii_export_allowed boolean DEFAULT false        -- explicit PII export grant
   status          enum DEFAULT active            -- active | suspended | deleted
   failed_attempts int DEFAULT 0
   locked_until    datetime
@@ -166,8 +168,9 @@ itinerary_items
   meetup_time     varchar(8) NOT NULL            -- HH:MM AM/PM (12-hour)
   meetup_location text NOT NULL
   notes           text                           -- max 2,000 chars
+  meetup_sort_at  datetime                       -- derived from meetup_date + meetup_time for ordering
   created_by      varchar(36) FK users
-  idempotency_key varchar(255) UNIQUE NOT NULL
+  idempotency_key varchar(255) UNIQUE NOT NULL   -- create-only dedup
   created_at      datetime
   updated_at      datetime
 
@@ -200,6 +203,7 @@ files
   sha256          varchar(64) NOT NULL           -- for deduplication
   storage_path    varchar(500) NOT NULL
   created_at      datetime
+  UNIQUE (sha256, group_id)                      -- dedup scoped per group
 
 file_access_log
   id              varchar(36) PK
@@ -311,6 +315,15 @@ evaluation_records
 ### Face Enrollment
 
 ```
+face_enrollment_sessions
+  id              varchar(36) PK
+  user_id         varchar(36) FK users
+  status          enum DEFAULT in_progress       -- in_progress | completed | expired
+  angles_captured json DEFAULT '{}'              -- {left: {captured, liveness}, front: ..., right: ...}
+  expires_at      datetime NOT NULL              -- sessions expire after 30 min
+  created_at      datetime
+  updated_at      datetime
+
 face_enrollments
   id              varchar(36) PK
   user_id         varchar(36) FK users
@@ -338,6 +351,48 @@ quality_checks
   passed          boolean
   run_at          datetime
   trace_id        varchar(36)
+```
+
+### Idempotency Keys (for update operations)
+
+```
+idempotency_keys
+  id              varchar(36) PK
+  key             varchar(255) NOT NULL
+  actor_id        varchar(36) FK users
+  operation       varchar(100) NOT NULL          -- e.g. update_itinerary
+  resource_scope  varchar(255)                   -- e.g. itinerary:<id>
+  request_hash    varchar(64) NOT NULL           -- SHA-256 of request body
+  response_snapshot json                         -- stored response for replay
+  expires_at      datetime NOT NULL              -- TTL 24h
+  created_at      datetime
+  UNIQUE (key, actor_id)
+```
+
+### Export Records
+
+```
+export_records
+  id              varchar(36) PK
+  user_id         varchar(36) FK users
+  export_type     varchar(50) NOT NULL           -- report | account_data | audit_log
+  format          varchar(10)                    -- csv | excel | zip
+  filters         json                           -- query parameters used
+  file_path       varchar(500) NOT NULL
+  created_at      datetime NOT NULL
+  expires_at      datetime NOT NULL              -- cleaned up by export cleanup job
+```
+
+### Operational Metrics
+
+```
+operational_metrics
+  id              varchar(36) PK
+  metric_name     varchar(255) NOT NULL          -- e.g. import_job_duration_ms
+  metric_value    decimal(15,4) NOT NULL
+  labels          json                           -- {batchId, jobType, ...}
+  trace_id        varchar(36)
+  recorded_at     datetime NOT NULL
 ```
 
 ### Audit
@@ -417,9 +472,13 @@ RevPAR = Total Room Revenue / Total Available Room Nights
 
 ```
 1. GET /notifications?groupId=&after=<cursor>&limit=50
-2. cursor = last notification ID seen by client
-3. SELECT * FROM notifications WHERE group_id=? AND id > cursor ORDER BY created_at ASC LIMIT 50
-4. Return notifications + next cursor
+2. cursor = base64-encoded {created_at, id} of last notification seen
+3. SELECT * FROM notifications
+     WHERE group_id = ?
+       AND (created_at > :ts OR (created_at = :ts AND id > :id))
+     ORDER BY created_at ASC, id ASC
+     LIMIT 50
+4. Return notifications + nextCursor (base64 of last row's {created_at, id})
 5. Idempotency: duplicate event with same idempotency_key is silently ignored
 ```
 
@@ -459,7 +518,9 @@ RevPAR = Total Room Revenue / Total Available Room Nights
 | Import retry | 5 min | Retry failed import batches (max 3, exponential backoff) |
 | Audit log retention check | daily | Alert if audit logs older than 1 year exist without archive |
 | Quality checks | 1 hour | Run configured integrity checks per entity type |
-| Export cleanup | 1 hour | Delete generated export archives older than 24h |
+| Export cleanup | 1 hour | Delete generated export archives past expires_at |
+| Idempotency key cleanup | 1 hour | Delete idempotency_keys past expires_at |
+| Enrollment session expiry | 15 min | Mark face enrollment sessions past expires_at as expired |
 
 ---
 
@@ -527,6 +588,10 @@ volumes:
 - Index `notifications.group_id`, `notifications.created_at` (for cursor pagination)
 - Index `staffing_records.employee_id`, `staffing_records.effective_date`
 - Index `files.sha256` (for deduplication lookup)
+- Index `idempotency_keys.key`, `idempotency_keys.expires_at`
+- Index `export_records.user_id`, `export_records.expires_at`
+- Index `operational_metrics.metric_name`, `operational_metrics.recorded_at`
+- Index `face_enrollment_sessions.user_id`, `face_enrollment_sessions.status`
 - Sequelize query builder for complex reporting aggregations
 - Connection pool: min 2, max 10
 - Import batches processed in chunks of 500 rows

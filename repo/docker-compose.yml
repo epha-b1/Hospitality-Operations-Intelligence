@@ -1,0 +1,50 @@
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: hospitality
+      DB_PASSWORD: hospitality
+      DB_NAME: hospitality
+      JWT_SECRET: change_me_in_production
+      ENCRYPTION_KEY: change_me_32_chars_minimum_here_x
+      JWT_TTL: "28800"
+      PORT: "3000"
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
+      - ./face-templates:/app/face-templates
+    command: sh -c "npm run migrate && npm run seed && node dist/server.js"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  db:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_USER: hospitality
+      MYSQL_PASSWORD: hospitality
+      MYSQL_DATABASE: hospitality
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "hospitality", "-phospitality"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    volumes:
+      - mysqldata:/var/lib/mysql
+
+volumes:
+  mysqldata:

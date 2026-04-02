@@ -668,6 +668,74 @@ paths:
         "400":
           description: Max 30 checkpoints reached
 
+  /groups/{groupId}/itineraries/{itemId}/checkpoints/{checkpointId}:
+    patch:
+      tags: [Itineraries]
+      summary: Update checkpoint (position, label, description)
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: itemId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: checkpointId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                description:
+                  type: string
+                position:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+      responses:
+        "200":
+          description: Checkpoint updated
+        "409":
+          description: Position conflict
+    delete:
+      tags: [Itineraries]
+      summary: Delete checkpoint
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: itemId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: checkpointId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Checkpoint deleted
+
   /groups/{groupId}/itineraries/{itemId}/checkin:
     post:
       tags: [Itineraries]
@@ -1442,6 +1510,82 @@ paths:
               schema:
                 type: string
 
+  /exports/{id}:
+    get:
+      tags: [Exports]
+      summary: Download export archive
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: File download
+        "404":
+          description: Export not found or expired
+        "403":
+          description: Not your export
+
+  /accounts/{userId}/role:
+    patch:
+      tags: [Accounts]
+      summary: Assign role to user (Hotel Admin only)
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [hotel_admin, manager, analyst, member]
+                propertyId:
+                  type: string
+                  format: uuid
+                  description: Required when role is manager
+                piiExportAllowed:
+                  type: boolean
+      responses:
+        "200":
+          description: Role updated
+        "403":
+          description: Not Hotel Admin
+
+  /metrics:
+    get:
+      tags: [Metrics]
+      summary: Get operational metrics (Hotel Admin only)
+      parameters:
+        - in: query
+          name: metricName
+          schema:
+            type: string
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Metrics
+
 tags:
   - name: Health
   - name: Auth
@@ -1455,3 +1599,5 @@ tags:
   - name: Face
   - name: Quality
   - name: Audit
+  - name: Exports
+  - name: Metrics

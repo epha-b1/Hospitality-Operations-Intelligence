@@ -29,8 +29,10 @@ What needs to be built:
 - JWT claims include role and property_id
 - RBAC middleware enforces role on every protected route
 - Manager queries always filtered by assigned property_id
-- PII export requires explicit permission grant (not default for any role)
+- PII export requires explicit `pii_export_allowed` flag on user (not default for any role)
 - Wrong role → 403
+- New users register as `member` by default; only hotel_admin can promote roles
+- `PATCH /accounts/:userId/role` — hotel_admin assigns role, property_id, and pii_export_allowed
 
 ---
 
@@ -145,6 +147,7 @@ What needs to be built:
 - Template update and deactivation endpoints
 - Raw image optional storage with 24-hour hard-delete
 - Face template list per user (versions, status)
+- Enrollment session tracking with 30-minute expiry
 
 ---
 
@@ -158,6 +161,8 @@ What needs to be built:
 - Quality check results stored with pass/fail and trace ID
 - End-to-end trace IDs on all ingestion, reporting, and export operations
 - Operational metrics: job duration, queue depth, DB resource usage (stored in DB)
+- Operational metrics stored in DB: job duration, queue depth, DB resource usage
+- `GET /metrics` endpoint for hotel_admin to query metrics
 - Structured JSON logging with trace ID on every request
 
 ---
@@ -173,4 +178,6 @@ What needs to be built:
 - Append-only audit_logs (no DELETE for app DB role), 1-year retention
 - Transactional boundaries for imports and itinerary edits (rollback on failure)
 - Exponential backoff retry (max 3 attempts) for import jobs
+- Export archive download endpoint `GET /exports/:id` with auth + ownership check
+- Export records tracked with expiry for cleanup job
 - Trace IDs on every request (X-Trace-Id header)

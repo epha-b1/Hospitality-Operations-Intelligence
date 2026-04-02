@@ -33,6 +33,8 @@ Evidence rule for each checked item:
 - [ ] Analyst: read-only reporting access only
 - [ ] Member: itinerary-only access
 - [ ] PII export blocked unless `pii_export_allowed` flag set
+- [ ] New users register with `member` role by default
+- [ ] `PATCH /accounts/:userId/role` restricted to hotel_admin only
 - [ ] Route-level authorization verified (protected route unauthenticated -> 401, wrong role -> 403)
 - [ ] Object-level authorization verified (resource ownership/membership required, not only ID lookup)
 - [ ] Cross-tenant data isolation verified (cross-group and cross-property reads/writes blocked)
@@ -132,6 +134,8 @@ Evidence rule for each checked item:
 - [ ] `GET /face/enrollments` — lists own enrollments with version and status
 - [ ] `PATCH /face/enrollments/:id` — deactivates enrollment
 - [ ] New enrollment creates new version, previous deactivated
+- [ ] Enrollment session tracked with 30-minute expiry
+- [ ] Expired sessions cleaned up by background job
 
 ---
 
@@ -146,6 +150,9 @@ Evidence rule for each checked item:
 - [ ] `GET /quality/results` — latest results
 - [ ] End-to-end trace IDs on all ingestion, reporting, and export operations
 - [ ] Operational metrics stored in DB (job duration, queue depth, DB resource usage)
+- [ ] `GET /metrics` endpoint for hotel_admin
+- [ ] `GET /exports/:id` download endpoint with auth + ownership check
+- [ ] Export records table tracks all exports with expiry
 
 ---
 
@@ -179,8 +186,11 @@ Evidence rule for each checked item:
 - [ ] `metadata.json` present with all required fields
 - [ ] `sessions/develop-1.json` trajectory file present
 - [ ] Face image cleanup job verified (24h hard-delete)
+- [ ] Enrollment session expiry job verified (30 min)
 - [ ] Export archive cleanup job verified
+- [ ] Idempotency key cleanup job verified (24h TTL)
 - [ ] Offline operation verified (no external dependencies)
+- [ ] Rate limiting configured (auth: 10/min, general: 100/min per IP)
 
 ---
 

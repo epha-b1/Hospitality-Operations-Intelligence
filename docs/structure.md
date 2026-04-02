@@ -13,7 +13,8 @@ Stack: Express + TypeScript + Sequelize + MySQL
 ├── docs/
 │   ├── design.md
 │   ├── api-spec.md
-│   ├── questions.md
+│   ├── questions.md                  # business logic ambiguities + assumptions
+│   ├── technical-decisions.md        # implementation gap resolutions
 │   ├── features.md
 │   ├── build-order.md
 │   ├── structure.md
@@ -62,7 +63,10 @@ repo/
 │   │   ├── reports.controller.ts     # reporting and analytics
 │   │   ├── import.controller.ts      # data import
 │   │   ├── face.controller.ts        # face enrollment
-│   │   └── notifications.controller.ts
+│   │   ├── notifications.controller.ts
+│   │   ├── quality.controller.ts     # data quality checks
+│   │   ├── audit.controller.ts       # audit log query/export
+│   │   └── exports.controller.ts     # export download
 │   ├── services/
 │   │   ├── auth.service.ts           # login, session management
 │   │   ├── rbac.service.ts           # role-based access control
@@ -74,6 +78,9 @@ repo/
 │   │   ├── face.service.ts           # face enrollment/recognition
 │   │   ├── notification.service.ts   # in-system notifications
 │   │   ├── encryption.service.ts     # AES-256 encryption
+│   │   ├── quality.service.ts        # data quality checks
+│   │   ├── metric.service.ts         # operational metrics recording
+│   │   ├── export.service.ts         # export archive creation
 │   │   └── audit.service.ts          # audit logging
 │   ├── middleware/
 │   │   ├── auth.middleware.ts        # authentication
@@ -88,9 +95,14 @@ repo/
 │   │   ├── group.model.ts            # Itinerary groups
 │   │   ├── itinerary.model.ts        # Itinerary items
 │   │   ├── file.model.ts             # File attachments
+│   │   ├── property.model.ts         # Hotel properties
 │   │   ├── reservation.model.ts      # Hotel reservations
 │   │   ├── room.model.ts             # Room inventory
-│   │   ├── face.model.ts             # Face enrollment data
+│   │   ├── import.model.ts           # Import batches, errors, staffing/eval records
+│   │   ├── face.model.ts             # Face enrollment sessions + enrollments
+│   │   ├── quality.model.ts          # Quality check configs + results
+│   │   ├── metric.model.ts           # Operational metrics
+│   │   ├── export.model.ts           # Export records
 │   │   ├── audit.model.ts            # Audit logs
 │   │   └── notification.model.ts     # Notification records
 │   ├── routes/
@@ -102,7 +114,10 @@ repo/
 │   │   ├── reports.routes.ts
 │   │   ├── import.routes.ts
 │   │   ├── face.routes.ts
-│   │   └── notifications.routes.ts
+│   │   ├── notifications.routes.ts
+│   │   ├── quality.routes.ts
+│   │   ├── audit.routes.ts
+│   │   └── exports.routes.ts
 │   ├── utils/
 │   │   ├── logger.ts                 # structured logging
 │   │   ├── validation.ts             # input validation
@@ -119,14 +134,20 @@ repo/
 │       ├── face.types.ts
 │       └── api.types.ts
 ├── migrations/                       # Sequelize migrations
-│   ├── 001-create-users.js
-│   ├── 002-create-roles.js
-│   ├── 003-create-groups.js
-│   ├── 004-create-itineraries.js
-│   ├── 005-create-files.js
-│   ├── 006-create-reservations.js
-│   ├── 007-create-face-data.js
-│   └── 008-create-audit-logs.js
+│   ├── 001-create-users.js           # users + activity_logs
+│   ├── 002-create-properties.js      # properties
+│   ├── 003-create-groups.js          # groups + group_members + group_required_fields + member_field_values
+│   ├── 004-create-itineraries.js     # itinerary_items + itinerary_checkpoints + member_checkins
+│   ├── 005-create-files.js           # files + file_access_log
+│   ├── 006-create-notifications.js   # notifications + notification_reads
+│   ├── 007-create-rooms.js           # rooms + reservations
+│   ├── 008-create-imports.js         # import_batches + import_errors + staffing_records + evaluation_records
+│   ├── 009-create-face-data.js       # face_enrollment_sessions + face_enrollments
+│   ├── 010-create-quality.js         # quality_checks
+│   ├── 011-create-audit-logs.js      # audit_logs
+│   ├── 012-create-idempotency.js     # idempotency_keys
+│   ├── 013-create-exports.js         # export_records
+│   └── 014-create-metrics.js         # operational_metrics
 ├── seeders/                          # Sequelize seed data
 │   ├── demo-users.js
 │   ├── demo-roles.js
