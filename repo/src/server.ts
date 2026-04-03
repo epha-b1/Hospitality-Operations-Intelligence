@@ -2,6 +2,7 @@ import app from './app';
 import { config } from './config/environment';
 import { testConnection } from './config/database';
 import { createCategoryLogger } from './utils/logger';
+import { registerCleanupJobs } from './jobs/cleanup';
 
 const systemLogger = createCategoryLogger('system');
 
@@ -15,6 +16,8 @@ async function start(): Promise<void> {
     });
     process.exit(1);
   }
+
+  registerCleanupJobs();
 
   app.listen(config.port, () => {
     systemLogger.info(`Server started on port ${config.port}`);

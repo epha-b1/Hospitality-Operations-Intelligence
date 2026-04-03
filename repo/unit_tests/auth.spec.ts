@@ -33,7 +33,7 @@ describe('Slice 2 — Auth Unit Tests', () => {
       expect(hash).not.toBe(password);
       expect(await bcrypt.compare(password, hash)).toBe(true);
       expect(await bcrypt.compare('wrong', hash)).toBe(false);
-    });
+    }, 15000);
   });
 
   describe('AES-256-GCM crypto', () => {
@@ -75,9 +75,9 @@ describe('Slice 2 — Auth Unit Tests', () => {
   });
 
   describe('Lockout logic', () => {
-    test('after 10 failures login should be blocked', () => {
-      // Simulate lockout logic
-      const LOCKOUT_THRESHOLD = 10;
+    test('after 5 failures login should be blocked', () => {
+      // Simulate lockout logic (matches Q2: 5 attempts)
+      const LOCKOUT_THRESHOLD = 5;
       let failedAttempts = 0;
       let lockedUntil: Date | null = null;
 
@@ -89,7 +89,7 @@ describe('Slice 2 — Auth Unit Tests', () => {
         lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
       }
 
-      expect(failedAttempts).toBe(10);
+      expect(failedAttempts).toBe(5);
       expect(lockedUntil).not.toBeNull();
       expect(lockedUntil!.getTime()).toBeGreaterThan(Date.now());
 

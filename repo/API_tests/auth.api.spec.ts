@@ -78,7 +78,7 @@ describe('Slice 2 — Auth API', () => {
       expect(res.body.code).toBe('UNAUTHORIZED');
     });
 
-    test('423 — after 10 failed attempts', async () => {
+    test('423 — after 5 failed attempts', async () => {
       const lockUser = {
         username: `locktest_${Date.now()}`,
         password: 'LockTest1!xx',
@@ -87,14 +87,14 @@ describe('Slice 2 — Auth API', () => {
       // Register
       await request(app).post('/auth/register').send(lockUser);
 
-      // Fail 10 times
-      for (let i = 0; i < 10; i++) {
+      // Fail 5 times
+      for (let i = 0; i < 5; i++) {
         await request(app)
           .post('/auth/login')
           .send({ username: lockUser.username, password: 'wrong' });
       }
 
-      // 11th attempt should be locked
+      // 6th attempt should be locked
       const res = await request(app)
         .post('/auth/login')
         .send({ username: lockUser.username, password: lockUser.password });

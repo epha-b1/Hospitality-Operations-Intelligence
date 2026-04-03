@@ -1,6 +1,7 @@
 services:
   api:
     build: .
+    image: hospitality-ops-api
     ports:
       - "3000:3000"
     environment:

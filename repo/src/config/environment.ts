@@ -13,6 +13,12 @@ export interface EnvironmentConfig {
   jwtSecret: string;
   encryptionKey: string;
   jwtTtl: number;
+  face: {
+    blinkMin: number;
+    blinkMax: number;
+    motionMin: number;
+    textureMin: number;
+  };
 }
 
 function loadConfig(): EnvironmentConfig {
@@ -28,7 +34,23 @@ function loadConfig(): EnvironmentConfig {
     jwtSecret: process.env.JWT_SECRET || 'change_me_in_production',
     encryptionKey: process.env.ENCRYPTION_KEY || 'change_me_32_chars_minimum_here_x',
     jwtTtl: parseInt(process.env.JWT_TTL || '28800', 10),
+    face: {
+      blinkMin: parseInt(process.env.FACE_BLINK_MIN || '100', 10),
+      blinkMax: parseInt(process.env.FACE_BLINK_MAX || '500', 10),
+      motionMin: parseFloat(process.env.FACE_MOTION_MIN || '0.6'),
+      textureMin: parseFloat(process.env.FACE_TEXTURE_MIN || '0.5'),
+    },
   };
 }
 
 export const config = loadConfig();
+
+// Warn on insecure defaults in production
+if (process.env.NODE_ENV === 'production') {
+  if (config.jwtSecret === 'change_me_in_production') {
+    console.error('WARNING: JWT_SECRET is using default value. Set a secure secret in production.');
+  }
+  if (config.encryptionKey === 'change_me_32_chars_minimum_here_x') {
+    console.error('WARNING: ENCRYPTION_KEY is using default value. Set a secure key in production.');
+  }
+}

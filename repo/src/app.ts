@@ -7,9 +7,20 @@ import { auditMiddleware } from './middleware/audit.middleware';
 import { AppError } from './utils/errors';
 import { traceStore } from './utils/logger';
 import { createCategoryLogger } from './utils/logger';
+import { openApiSpec } from './swagger';
+import { generalLimiter, authLimiter } from './middleware/rate-limit.middleware';
 import authRoutes from './routes/auth.routes';
 import accountsRoutes from './routes/accounts.routes';
 import usersRoutes from './routes/users.routes';
+import groupsRoutes from './routes/groups.routes';
+import itinerariesRoutes from './routes/itineraries.routes';
+import filesRoutes from './routes/files.routes';
+import notificationsRoutes from './routes/notifications.routes';
+import reportsRoutes from './routes/reports.routes';
+import importRoutes from './routes/import.routes';
+import faceRoutes from './routes/face.routes';
+import qualityRoutes from './routes/quality.routes';
+import auditRoutes from './routes/audit.routes';
 
 const systemLogger = createCategoryLogger('system');
 
@@ -30,49 +41,62 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // Swagger UI
-const stubSpec = {
-  openapi: '3.0.3',
-  info: {
-    title: 'Hospitality Operations Intelligence API',
-    version: '1.0.0',
-    description: 'Hospitality Operations Intelligence & Group Itinerary Platform',
-  },
-  servers: [{ url: 'http://localhost:3000', description: 'Local' }],
-  paths: {
-    '/health': {
-      get: {
-        tags: ['Health'],
-        summary: 'Health check',
-        responses: {
-          '200': {
-            description: 'OK',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    status: { type: 'string', example: 'ok' },
-                    timestamp: { type: 'string', format: 'date-time' },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-};
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(stubSpec));
+// Rate limiting — general per-user applied after auth middleware populates user
+app.use(generalLimiter);
 
 // API routes
 app.use('/auth', authRoutes);
 app.use('/accounts', accountsRoutes);
 app.use('/users', usersRoutes);
+app.use('/groups', groupsRoutes);
+app.use('/groups/:groupId/itineraries', itinerariesRoutes);
+app.use('/groups/:groupId/files', filesRoutes);
+app.use('/notifications', notificationsRoutes);
+app.use('/reports', reportsRoutes);
+app.use('/import', importRoutes);
+app.use('/face', faceRoutes);
+app.use('/quality', qualityRoutes);
+app.use('/audit-logs', auditRoutes);
 
-// Static file serving for exports
-app.use('/exports', express.static(path.resolve('exports')));
+// Authenticated export download — strict ownership via ExportRecord
+// Policy: a valid ExportRecord MUST exist. No record = 404 (deny by default).
+import { authMiddleware as exportAuth, AuthenticatedRequest } from './middleware/auth.middleware';
+import { ExportRecord } from './models/export.model';
+app.get('/exports/:filename', exportAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const filename = path.basename(req.params.filename);
+
+    // Reject any path traversal or internal temp artifacts
+    if (filename.startsWith('.')) {
+      next(new AppError(404, 'NOT_FOUND', 'Export not found')); return;
+    }
+
+    const record = await ExportRecord.findOne({ where: { filename } });
+
+    // No record = deny. Every legitimate export MUST be registered.
+    if (!record) {
+      next(new AppError(404, 'NOT_FOUND', 'Export not found')); return;
+    }
+
+    // Expired
+    if (new Date(record.expires_at) < new Date()) {
+      next(new AppError(404, 'NOT_FOUND', 'Export has expired')); return;
+    }
+
+    // Ownership: only the creating user or hotel_admin
+    const authReq = req as AuthenticatedRequest;
+    if (record.user_id !== authReq.user!.id && authReq.user!.role !== 'hotel_admin') {
+      next(new AppError(403, 'FORBIDDEN', 'You do not have access to this export')); return;
+    }
+
+    const filePath = path.resolve('exports', filename);
+    const fs = require('fs');
+    if (!fs.existsSync(filePath)) { next(new AppError(404, 'NOT_FOUND', 'Export not found or expired')); return; }
+    res.download(filePath);
+  } catch (e) { next(e); }
+});
 
 // 404 handler
 app.use((_req: Request, _res: Response, next: NextFunction) => {

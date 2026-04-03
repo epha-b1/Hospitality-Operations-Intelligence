@@ -1,11 +1,11 @@
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
-  modulePathIgnorePatterns: ['<rootDir>/dist/'],
   projects: [
     {
       displayName: 'unit',
       preset: 'ts-jest',
       testEnvironment: 'node',
+      roots: ['<rootDir>/unit_tests', '<rootDir>/src'],
       testMatch: ['<rootDir>/unit_tests/**/*.spec.ts'],
       moduleFileExtensions: ['ts', 'js', 'json'],
       moduleNameMapper: {
@@ -18,6 +18,7 @@ module.exports = {
       displayName: 'api',
       preset: 'ts-jest',
       testEnvironment: 'node',
+      roots: ['<rootDir>/API_tests', '<rootDir>/src'],
       testMatch: ['<rootDir>/API_tests/**/*.spec.ts'],
       moduleFileExtensions: ['ts', 'js', 'json'],
     },

@@ -5,9 +5,10 @@ Offline-first backend API for hotel group itinerary coordination, operational re
 ## Quick Start
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
+
+No `.env` file needed — all configuration is inline in `docker-compose.yml`.
 
 ## Ports
 
@@ -19,17 +20,16 @@ docker compose up --build
 
 ## Test Credentials
 
-| Username | Password      | Role        |
-|----------|---------------|-------------|
-| admin    | Admin1!pass   | hotel_admin |
+| Username  | Password        | Role        |
+|-----------|-----------------|-------------|
+| admin     | Admin1!pass     | hotel_admin |
+| manager1  | Manager1!pass   | manager     |
+| analyst1  | Analyst1!pass   | analyst     |
+| member1   | Member1!pass    | member      |
 
 ## Run Tests
 
 ```bash
-# Inside the container
-docker compose exec api sh run_tests.sh
-
-# Or individually
-docker compose exec api npm run test:unit
-docker compose exec api npm run test:api
+# From the project root — starts containers, waits for health, runs all tests
+./run_tests.sh
 ```

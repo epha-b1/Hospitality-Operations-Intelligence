@@ -1,0 +1,157 @@
+import request from 'supertest';
+import app from '../src/app';
+import { sequelize } from '../src/config/database';
+
+let adminToken: string;
+let memberToken: string;
+let groupId: string;
+let itemId: string;
+let checkpointId: string;
+const RUN_ID = Date.now();
+
+beforeAll(async () => {
+  await sequelize.authenticate();
+  const a = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
+  adminToken = a.body.accessToken;
+  const m = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
+  memberToken = m.body.accessToken;
+
+  // Create a group and have member join
+  const g = await request(app).post('/groups').set('Authorization', `Bearer ${adminToken}`).send({ name: 'Itin Test Group' });
+  groupId = g.body.id;
+  await request(app).post('/groups/join').set('Authorization', `Bearer ${memberToken}`).send({ joinCode: g.body.join_code });
+});
+
+afterAll(async () => { await sequelize.close(); });
+
+describe('Slice 5 — Itineraries API', () => {
+  test('POST create item 201', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Morning Hike', meetupDate: '12/25/2025', meetupTime: '9:30 AM', meetupLocation: 'Lobby', notes: 'Bring water', idempotencyKey: `itin-create-${RUN_ID}` });
+    expect(res.status).toBe(201);
+    expect(res.body.title).toBe('Morning Hike');
+    itemId = res.body.id;
+  });
+
+  test('POST create — idempotency returns same item', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Morning Hike', meetupDate: '12/25/2025', meetupTime: '9:30 AM', meetupLocation: 'Lobby', idempotencyKey: `itin-create-${RUN_ID}` });
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBe(itemId);
+  });
+
+  test('POST create 400 — bad date format', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Bad', meetupDate: '2025-12-25', meetupTime: '9:30 AM', meetupLocation: 'X', idempotencyKey: 'bad-date' });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST create 400 — bad time format', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Bad', meetupDate: '12/25/2025', meetupTime: '13:00', meetupLocation: 'X', idempotencyKey: 'bad-time' });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST create 400 — notes too long', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Long', meetupDate: '12/25/2025', meetupTime: '9:30 AM', meetupLocation: 'X', notes: 'x'.repeat(2001), idempotencyKey: 'long-notes' });
+    expect(res.status).toBe(400);
+  });
+
+  test('GET list items 200', async () => {
+    const res = await request(app).get(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('GET single item 200', async () => {
+    const res = await request(app).get(`/groups/${groupId}/itineraries/${itemId}`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe('Morning Hike');
+  });
+
+  test('PATCH update item 200', async () => {
+    const res = await request(app).patch(`/groups/${groupId}/itineraries/${itemId}`).set('Authorization', `Bearer ${memberToken}`)
+      .send({ title: 'Evening Hike', idempotencyKey: `itin-update-${RUN_ID}` });
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe('Evening Hike');
+  });
+
+  test('PATCH update — same idempotency key + same body replays response', async () => {
+    const res = await request(app).patch(`/groups/${groupId}/itineraries/${itemId}`).set('Authorization', `Bearer ${memberToken}`)
+      .send({ title: 'Evening Hike', idempotencyKey: `itin-update-${RUN_ID}` });
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe('Evening Hike');
+  });
+
+  test('PATCH update — same key + different body = 409 conflict', async () => {
+    const res = await request(app).patch(`/groups/${groupId}/itineraries/${itemId}`).set('Authorization', `Bearer ${memberToken}`)
+      .send({ title: 'DIFFERENT TITLE', idempotencyKey: `itin-update-${RUN_ID}` });
+    expect(res.status).toBe(409);
+  });
+
+  test('POST add checkpoint 201', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries/${itemId}/checkpoints`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ label: 'Trailhead', position: 1, description: 'Start here' });
+    expect(res.status).toBe(201);
+    checkpointId = res.body.id;
+  });
+
+  test('GET list checkpoints 200', async () => {
+    const res = await request(app).get(`/groups/${groupId}/itineraries/${itemId}/checkpoints`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBe(1);
+  });
+
+  test('PATCH update checkpoint 200', async () => {
+    const res = await request(app).patch(`/groups/${groupId}/itineraries/${itemId}/checkpoints/${checkpointId}`).set('Authorization', `Bearer ${memberToken}`)
+      .send({ label: 'Updated Trailhead' });
+    expect(res.status).toBe(200);
+    expect(res.body.label).toBe('Updated Trailhead');
+  });
+
+  test('POST checkin 200 — no required fields', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries/${itemId}/checkin`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(200);
+  });
+
+  test('POST checkin 400 — missing required fields', async () => {
+    // Add a required field
+    await request(app).post(`/groups/${groupId}/required-fields`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ fieldName: 'badge_number', fieldType: 'text', isRequired: true });
+
+    // Create a new item to checkin to
+    const newItem = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Require Fields Test', meetupDate: '01/01/2026', meetupTime: '8:00 AM', meetupLocation: 'Gate', idempotencyKey: `checkin-req-${RUN_ID}` });
+
+    const res = await request(app).post(`/groups/${groupId}/itineraries/${newItem.body.id}/checkin`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('MISSING_REQUIRED_FIELDS');
+  });
+
+  test('DELETE item 204 — owner only', async () => {
+    const tempItem = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Delete Me', meetupDate: '01/01/2026', meetupTime: '10:00 AM', meetupLocation: 'X', idempotencyKey: `del-item-${RUN_ID}` });
+    const res = await request(app).delete(`/groups/${groupId}/itineraries/${tempItem.body.id}`).set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(204);
+  });
+
+  test('DELETE item 403 — member cannot delete', async () => {
+    const res = await request(app).delete(`/groups/${groupId}/itineraries/${itemId}`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — non-member cannot access', async () => {
+    const reg = await request(app).post('/auth/register').send({ username: `outsider2_${Date.now()}`, password: 'Outsider1!xx' });
+    const login = await request(app).post('/auth/login').send({ username: reg.body.username, password: 'Outsider1!xx' });
+    const res = await request(app).get(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${login.body.accessToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('POST checkpoint 409 — duplicate position conflict', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries/${itemId}/checkpoints`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ label: 'Duplicate Pos', position: 1 });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('CONFLICT');
+  });
+});

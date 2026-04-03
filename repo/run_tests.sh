@@ -26,7 +26,7 @@ echo ""
 echo "=== Step 2: Waiting for API health ==="
 
 TRIES=0
-MAX_TRIES=60
+MAX_TRIES=120
 while [ $TRIES -lt $MAX_TRIES ]; do
   if $COMPOSE exec -T api wget -qO- http://localhost:3000/health >/dev/null 2>&1; then
     echo "  API is healthy after ${TRIES}s."

@@ -6,6 +6,11 @@ import fs from 'fs';
 import path from 'path';
 import { User } from '../models/user.model';
 import { ActivityLog } from '../models/activity-log.model';
+import { FileRecord } from '../models/file.model';
+import { GroupMember, Group } from '../models/group.model';
+import { FaceEnrollment } from '../models/face.model';
+import { AuditLog } from '../models/audit.model';
+import { ExportRecord } from '../models/export.model';
 import { AppError, ErrorCodes } from '../utils/errors';
 import { config } from '../config/environment';
 import { authConfig } from '../config/auth';
@@ -15,7 +20,7 @@ import { traceStore, createCategoryLogger } from '../utils/logger';
 const authLogger = createCategoryLogger('auth');
 
 const BCRYPT_ROUNDS = 12;
-const LOCKOUT_THRESHOLD = 10;
+const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
 const PASSWORD_REGEX = /^(?=.*\d)(?=.*[^a-zA-Z0-9]).{10,}$/;
@@ -41,6 +46,20 @@ async function logActivity(userId: string, action: string, detail?: Record<strin
     action,
     detail: detail || null,
     trace_id: getTraceId() || null,
+    created_at: new Date(),
+  });
+}
+
+async function logAudit(actorId: string | null, action: string, resourceType?: string, resourceId?: string, detail?: Record<string, unknown>, ipAddress?: string): Promise<void> {
+  await AuditLog.create({
+    id: uuidv4(),
+    actor_id: actorId,
+    action,
+    resource_type: resourceType || null,
+    resource_id: resourceId || null,
+    detail: detail || null,
+    trace_id: getTraceId() || null,
+    ip_address: ipAddress || null,
     created_at: new Date(),
   });
 }
@@ -71,6 +90,7 @@ export async function register(
   });
 
   await logActivity(id, 'register', { username });
+  await logAudit(id, 'register', 'user', id, { username });
   authLogger.info('User registered', { userId: id, username });
 
   return { id: user.id, username: user.username, role: user.role };
@@ -141,6 +161,7 @@ export async function login(
   });
 
   await logActivity(user.id, 'login', { username });
+  await logAudit(user.id, 'login', 'user', user.id);
   authLogger.info('User logged in', { userId: user.id, username });
 
   return {
@@ -173,6 +194,7 @@ export async function changePassword(
   await User.update({ password_hash: passwordHash }, { where: { id: userId } });
 
   await logActivity(userId, 'change_password');
+  await logAudit(userId, 'change_password', 'user', userId);
   authLogger.info('Password changed', { userId });
 }
 
@@ -221,13 +243,38 @@ export async function deleteAccount(userId: string, password: string): Promise<v
     throw new AppError(ErrorCodes.UNAUTHORIZED.statusCode, ErrorCodes.UNAUTHORIZED.code, 'Invalid password');
   }
 
+  // Deactivate face enrollments
+  await FaceEnrollment.update({ status: 'deactivated' }, { where: { user_id: userId, status: 'active' } });
+
+  // Transfer owned groups or archive them
+  const ownedGroups = await GroupMember.findAll({ where: { user_id: userId, role: 'owner' } });
+  for (const membership of ownedGroups) {
+    const nextAdmin = await GroupMember.findOne({
+      where: { group_id: membership.group_id, role: 'admin', user_id: { [require('sequelize').Op.ne]: userId } },
+    });
+    if (nextAdmin) {
+      await GroupMember.update({ role: 'owner' }, { where: { id: nextAdmin.id } });
+      // Keep groups.owner_id consistent with the new owner
+      await Group.update({ owner_id: nextAdmin.user_id }, { where: { id: membership.group_id } });
+    } else {
+      await Group.update({ status: 'archived' }, { where: { id: membership.group_id } });
+    }
+  }
+
+  // Remove all group memberships
+  await GroupMember.destroy({ where: { user_id: userId } });
+
+  // Soft-delete user
   await User.update(
     { status: 'deleted', deleted_at: new Date() },
     { where: { id: userId } }
   );
 
   await logActivity(userId, 'delete_account');
-  authLogger.info('Account deleted', { userId });
+  await logAudit(userId, 'delete_account', 'user', userId, {
+    cascaded: { faceEnrollmentsDeactivated: true, groupMembershipsRemoved: true, ownedGroupsHandled: ownedGroups.length },
+  });
+  authLogger.info('Account deleted with cascade', { userId });
 }
 
 export async function exportData(
@@ -253,13 +300,24 @@ export async function exportData(
     fs.mkdirSync(exportDir, { recursive: true });
   }
 
-  const filePath = path.join(exportDir, filename);
-  const output = fs.createWriteStream(filePath);
+  // Gather uploaded files before archiving
+  const uploadedFiles = await FileRecord.findAll({ where: { uploaded_by: userId } });
+
+  const archivePath = path.join(exportDir, filename);
+  const output = fs.createWriteStream(archivePath);
   const archive = archiver('zip', { zlib: { level: 9 } });
 
   return new Promise((resolve, reject) => {
     output.on('close', async () => {
+      // Register export ownership record
+      await ExportRecord.create({
+        id: exportId, user_id: userId, filename,
+        export_type: 'account_data',
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        created_at: new Date(),
+      });
       await logActivity(userId, 'export_data', { filename });
+      await logAudit(userId, 'export_data', 'user', userId, { filename });
       authLogger.info('Data exported', { userId, filename });
       resolve({ downloadUrl: `/exports/${filename}` });
     });
@@ -273,11 +331,20 @@ export async function exportData(
       { name: 'activity.json' }
     );
 
+    // Include uploaded files
+    for (const file of uploadedFiles) {
+      const diskPath = path.resolve(file.storage_path);
+      if (fs.existsSync(diskPath)) {
+        archive.file(diskPath, { name: `files/${file.original_name}` });
+      }
+    }
+
     archive.finalize();
   });
 }
 
 export async function logout(userId: string): Promise<void> {
   await logActivity(userId, 'logout');
+  await logAudit(userId, 'logout', 'user', userId);
   authLogger.info('User logged out', { userId });
 }
