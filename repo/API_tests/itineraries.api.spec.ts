@@ -116,6 +116,27 @@ describeDb('Slice 5 — Itineraries API', () => {
     checkpointId = res.body.id;
   });
 
+  test('POST add checkpoint 400 — position out of range (zod)', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries/${itemId}/checkpoints`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ label: 'Bad', position: 99 });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  test('POST add checkpoint 400 — missing label (zod)', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries/${itemId}/checkpoints`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ position: 2 });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  test('POST add checkpoint 400 — strict schema rejects unknown field', async () => {
+    const res = await request(app).post(`/groups/${groupId}/itineraries/${itemId}/checkpoints`).set('Authorization', `Bearer ${adminToken}`)
+      .send({ label: 'X', position: 3, secretInjection: '<script>' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
   test('GET list checkpoints 200', async () => {
     const res = await request(app).get(`/groups/${groupId}/itineraries/${itemId}/checkpoints`).set('Authorization', `Bearer ${memberToken}`);
     expect(res.status).toBe(200);
@@ -325,6 +346,100 @@ describeDb('Slice 5 — Itineraries API', () => {
         });
       expect(conflict.status).toBe(409);
       expect(conflict.body.code).toBe('IDEMPOTENCY_CONFLICT');
+    });
+
+    // Combined-axes negative test asked for in the final hardening
+    // pass: key reused across BOTH a different user AND a different
+    // group AND with a different payload. Three independent rows must
+    // result, none of which leak data from any of the others.
+    test('different user + different group + different payload → 3 distinct rows, no replay leak', async () => {
+      const sharedKey = `triple-axis-${RUN_ID}`;
+
+      // ── Setup: 3 isolated groups ────────────────────────────────
+      const gA = await request(app).post('/groups')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: `Triple A ${RUN_ID}` });
+      const gB = await request(app).post('/groups')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: `Triple B ${RUN_ID}` });
+      const gC = await request(app).post('/groups')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: `Triple C ${RUN_ID}` });
+
+      // member1 joins group B so we can post under their identity
+      await request(app).post('/groups/join')
+        .set('Authorization', `Bearer ${memberToken}`)
+        .send({ joinCode: gB.body.join_code });
+
+      // Create a third user (outsider) and have them join group C
+      const outsiderRes = await request(app).post('/auth/register')
+        .send({ username: `triple_outsider_${RUN_ID}`, password: 'Outsider1!xx' });
+      const outsiderLogin = await request(app).post('/auth/login')
+        .send({ username: outsiderRes.body.username, password: 'Outsider1!xx' });
+      const outsiderToken = outsiderLogin.body.accessToken;
+      await request(app).post('/groups/join')
+        .set('Authorization', `Bearer ${outsiderToken}`)
+        .send({ joinCode: gC.body.join_code });
+
+      // ── Three POSTs: distinct user, group, and payload ───────────
+      const itemA = await request(app)
+        .post(`/groups/${gA.body.id}/itineraries`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          title: 'A — admin',
+          meetupDate: '08/01/2026',
+          meetupTime: '8:00 AM',
+          meetupLocation: 'A-Lobby',
+          notes: 'admin notes A',
+          idempotencyKey: sharedKey,
+        });
+      expect(itemA.status).toBe(201);
+
+      const itemB = await request(app)
+        .post(`/groups/${gB.body.id}/itineraries`)
+        .set('Authorization', `Bearer ${memberToken}`)
+        .send({
+          title: 'B — member',
+          meetupDate: '08/02/2026',
+          meetupTime: '9:00 AM',
+          meetupLocation: 'B-Lobby',
+          notes: 'member notes B',
+          idempotencyKey: sharedKey,
+        });
+      expect(itemB.status).toBe(201);
+
+      const itemC = await request(app)
+        .post(`/groups/${gC.body.id}/itineraries`)
+        .set('Authorization', `Bearer ${outsiderToken}`)
+        .send({
+          title: 'C — outsider',
+          meetupDate: '08/03/2026',
+          meetupTime: '10:00 AM',
+          meetupLocation: 'C-Lobby',
+          notes: 'outsider notes C',
+          idempotencyKey: sharedKey,
+        });
+      expect(itemC.status).toBe(201);
+
+      // All three IDs distinct
+      expect(new Set([itemA.body.id, itemB.body.id, itemC.body.id]).size).toBe(3);
+
+      // Each row carries its own group_id and created_by
+      expect(itemA.body.group_id).toBe(gA.body.id);
+      expect(itemB.body.group_id).toBe(gB.body.id);
+      expect(itemC.body.group_id).toBe(gC.body.id);
+
+      expect(itemA.body.created_by).not.toBe(itemB.body.created_by);
+      expect(itemA.body.created_by).not.toBe(itemC.body.created_by);
+      expect(itemB.body.created_by).not.toBe(itemC.body.created_by);
+
+      // Each row carries its own payload — no foreign data leak
+      expect(itemA.body.title).toBe('A — admin');
+      expect(itemB.body.title).toBe('B — member');
+      expect(itemC.body.title).toBe('C — outsider');
+      expect(itemA.body.notes).toBe('admin notes A');
+      expect(itemB.body.notes).toBe('member notes B');
+      expect(itemC.body.notes).toBe('outsider notes C');
     });
   });
 });

@@ -18,7 +18,7 @@
  * Triggers fire regardless of source (ORM, raw SQL, ad-hoc client) so they
  * close the gap left by app-level hooks. For defense-in-depth, production
  * deployments should additionally REVOKE UPDATE, DELETE on audit_logs from
- * the application user — see docs/audit-immutability.md.
+ * the application user — see scripts/audit-immutability.sql.
  *
  * Down-migration removes the triggers for dev/test rollback only.
  */

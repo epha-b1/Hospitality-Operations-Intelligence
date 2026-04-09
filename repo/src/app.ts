@@ -7,6 +7,7 @@ import { auditMiddleware } from './middleware/audit.middleware';
 import { AppError } from './utils/errors';
 import { traceStore } from './utils/logger';
 import { createCategoryLogger } from './utils/logger';
+import { formatErrorLogMeta, formatErrorResponseBody } from './utils/error-sanitization';
 import { openApiSpec } from './swagger';
 import { generalLimiter, authLimiter } from './middleware/rate-limit.middleware';
 import authRoutes from './routes/auth.routes';
@@ -119,9 +120,9 @@ app.use((_req: Request, _res: Response, next: NextFunction) => {
 //
 // Audit-log masking is unaffected — masking happens before the logger
 // in audit.controller, and the system logger does NOT touch
-// audit_logs.
-const isProd = process.env.NODE_ENV === 'production';
-
+// audit_logs. The sanitization helpers live in
+// src/utils/error-sanitization.ts so the unit tests exercise the
+// exact code path used at runtime.
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   const traceId = traceStore.getStore()?.traceId || 'unknown';
 
@@ -135,24 +136,13 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
 
-  // Unhandled — log with sanitization in production
-  systemLogger.error('unhandled_error', {
-    traceId,
-    errorClass: err.constructor?.name || 'Error',
-    // Keep the raw message in dev/test for debugging; in prod we
-    // emit only the class name + traceId, since arbitrary error
-    // messages can carry sensitive payload data.
-    ...(isProd ? {} : { error: err.message, stack: err.stack }),
-  });
+  // Re-evaluate isProd PER REQUEST so tests that flip NODE_ENV after
+  // module load still see the right behavior. The cost is one cheap
+  // string compare per unhandled error, which is negligible.
+  const isProd = process.env.NODE_ENV === 'production';
 
-  res.status(500).json({
-    statusCode: 500,
-    code: 'INTERNAL_ERROR',
-    // Generic body in production. Dev/test surfaces the underlying
-    // message to make tests and local debugging easy.
-    message: isProd ? 'Internal server error' : (err.message || 'Internal server error'),
-    traceId,
-  });
+  systemLogger.error('unhandled_error', formatErrorLogMeta(err, isProd, traceId));
+  res.status(500).json(formatErrorResponseBody(err, isProd, traceId));
 });
 
 export default app;

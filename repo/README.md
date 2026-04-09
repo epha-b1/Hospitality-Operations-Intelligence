@@ -102,13 +102,12 @@ separately with `docker compose up db -d`.
 | `var/import-tmp/`        | Staging area for validated-but-uncommitted imports (ignored) |
 | `uploads/`               | User-uploaded files (ignored) |
 | `face-templates/`        | Face enrollment templates (ignored) |
-| `docs/`                  | Supplementary docs (e.g. audit immutability) |
 
 ## Security Notes
 
 - Audit logs are append-only and enforced by Sequelize hooks + MySQL
-  triggers. See `docs/audit-immutability.md` for the enforcement model
-  and verification steps.
+  triggers. The provisioning SQL and verification script live under
+  `scripts/` (`audit-immutability.sql`, `verify-audit-immutability.sh`).
 - Sensitive fields (passwords, tokens, secrets, API keys, session tokens)
   are deep-masked before being returned from either `GET /audit-logs` or
   `GET /audit-logs/export`.

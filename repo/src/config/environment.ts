@@ -69,31 +69,49 @@ export class ConfigValidationError extends Error {
 }
 
 /**
+ * Actionable fix-it guidance shown after the problem list. Lists the
+ * exact env var names and the canonical command to generate strong
+ * values, so an operator can resolve the failure without reading the
+ * source.
+ */
+export const FIX_IT_GUIDANCE = [
+  'Resolve by setting these environment variables before starting the API:',
+  '  JWT_SECRET=$(openssl rand -hex 32)',
+  '  ENCRYPTION_KEY=$(openssl rand -hex 32)',
+  '  DB_PASSWORD=<a strong, unique password from your secret manager>',
+  '',
+  'Then re-launch with NODE_ENV=production. See README.md "Production secrets".',
+].join('\n');
+
+/**
  * Validate the loaded config for production deployment safety.
  *
  * Returns an array of human-readable problems. Empty array = OK. The
  * function is exported so unit tests can exercise it directly without
  * needing to set NODE_ENV.
+ *
+ * Each message names the offending environment variable explicitly so
+ * the operator does not need to grep the code to locate it.
  */
 export function validateProductionConfig(cfg: EnvironmentConfig): string[] {
   const problems: string[] = [];
 
   if (KNOWN_WEAK_SECRETS.has(cfg.jwtSecret)) {
-    problems.push('JWT_SECRET is set to a known insecure default. Generate a strong random value (>= 32 chars).');
+    problems.push('JWT_SECRET is set to a known insecure default. Set the JWT_SECRET env var to a strong random value (>= 32 chars).');
   }
   if (cfg.jwtSecret.length < MIN_JWT_SECRET_LENGTH) {
-    problems.push(`JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters long (current: ${cfg.jwtSecret.length}).`);
+    problems.push(`JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters long (current: ${cfg.jwtSecret.length}). Generate one with: openssl rand -hex 32`);
   }
 
   if (KNOWN_WEAK_SECRETS.has(cfg.encryptionKey)) {
-    problems.push('ENCRYPTION_KEY is set to a known insecure default. Generate a strong random value (>= 32 chars).');
+    problems.push('ENCRYPTION_KEY is set to a known insecure default. Set the ENCRYPTION_KEY env var to a strong random value (>= 32 chars).');
   }
   if (cfg.encryptionKey.length < MIN_ENCRYPTION_KEY_LENGTH) {
-    problems.push(`ENCRYPTION_KEY must be at least ${MIN_ENCRYPTION_KEY_LENGTH} characters long (current: ${cfg.encryptionKey.length}).`);
+    problems.push(`ENCRYPTION_KEY must be at least ${MIN_ENCRYPTION_KEY_LENGTH} characters long (current: ${cfg.encryptionKey.length}). Generate one with: openssl rand -hex 32`);
   }
 
   if (cfg.db.password === '' || cfg.db.password === 'hospitality') {
-    problems.push('DB_PASSWORD is empty or the bundled dev default. Set a strong DB password in production.');
+    problems.push('DB_PASSWORD is empty or the bundled dev default. Set the DB_PASSWORD env var to a strong, unique password from your secret manager.');
   }
 
   return problems;
@@ -141,6 +159,8 @@ if (config.nodeEnv === 'production') {
     console.error('============================================================');
     console.error('FATAL: Insecure production configuration detected.');
     for (const p of problems) console.error('  -', p);
+    console.error('');
+    console.error(FIX_IT_GUIDANCE);
     console.error('============================================================');
     /* eslint-enable no-console */
     throw new ConfigValidationError(problems);

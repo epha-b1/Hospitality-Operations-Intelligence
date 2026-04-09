@@ -6,8 +6,10 @@
  * sequelize runtime is enough to verify that the hooks reject every
  * mutation path before any SQL is emitted.
  *
- * Layer 2 (DB triggers) and layer 3 (production role grants) are covered
- * in docs/audit-immutability.md with concrete verification commands.
+ * Layer 2 (DB triggers) and layer 3 (production role grants) are
+ * provisioned by migrations/017-audit-logs-immutability.js and
+ * scripts/audit-immutability.sql respectively, and verified by
+ * scripts/verify-audit-immutability.sh.
  */
 
 import { AuditLog } from '../src/models/audit.model';

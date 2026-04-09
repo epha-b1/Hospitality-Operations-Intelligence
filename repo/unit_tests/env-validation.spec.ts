@@ -12,7 +12,7 @@
  *  - strong values → accept
  */
 
-import { validateProductionConfig, ConfigValidationError } from '../src/config/environment';
+import { validateProductionConfig, ConfigValidationError, FIX_IT_GUIDANCE } from '../src/config/environment';
 
 function strong(len = 64): string {
   // 'a' x 64 — meets the length floor without being a known weak value
@@ -95,6 +95,28 @@ describe('validateProductionConfig', () => {
     expect(err.message).toContain('Insecure production configuration');
     for (const p of problems) expect(err.message).toContain(p);
   });
+
+  test('error messages explicitly name each offending env var', () => {
+    // Single message with all three problems → must mention all three
+    // env var names so an operator can fix them without reading source.
+    const problems = validateProductionConfig(baseCfg({
+      jwtSecret: 'change_me_in_production',
+      encryptionKey: 'change_me_32_chars_minimum_here_x',
+      db: { host: 'db', port: 3306, user: 'app', password: 'hospitality', name: 'h' },
+    }));
+    const joined = problems.join('\n');
+    expect(joined).toContain('JWT_SECRET');
+    expect(joined).toContain('ENCRYPTION_KEY');
+    expect(joined).toContain('DB_PASSWORD');
+  });
+
+  test('FIX_IT_GUIDANCE includes the openssl recipe and all three env vars', () => {
+    expect(FIX_IT_GUIDANCE).toContain('openssl rand -hex 32');
+    expect(FIX_IT_GUIDANCE).toContain('JWT_SECRET');
+    expect(FIX_IT_GUIDANCE).toContain('ENCRYPTION_KEY');
+    expect(FIX_IT_GUIDANCE).toContain('DB_PASSWORD');
+    expect(FIX_IT_GUIDANCE).toContain('NODE_ENV=production');
+  });
 });
 
 // ─── Module-load fail-fast (production gate) ────────────────────────
@@ -109,9 +131,19 @@ describe('environment.ts module load — production fail-fast', () => {
     process.env.ENCRYPTION_KEY = 'change_me_32_chars_minimum_here_x';
     process.env.DB_PASSWORD = 'hospitality';
 
-    // Silence the console.error noise from the fatal banner
-    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    // Capture the fatal banner to assert it carries the fix-it guidance
+    const calls: string[][] = [];
+    const errSpy = jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      calls.push(args.map(String));
+    });
     expect(() => require('../src/config/environment')).toThrow(/Insecure production configuration/);
+
+    // The banner must include the openssl recipe and at least one env var name.
+    const banner = calls.flat().join('\n');
+    expect(banner).toContain('FATAL');
+    expect(banner).toContain('openssl rand -hex 32');
+    expect(banner).toContain('JWT_SECRET');
+
     errSpy.mockRestore();
   });
 

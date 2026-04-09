@@ -213,4 +213,75 @@ describeDb('Reports KPI room-night formulas — deterministic numerics', () => {
     expect(Number(rows[0].occupied_room_nights)).toBe(5);   // 1+2+2
     expect(Number(rows[0].occupancy_rate)).toBeCloseTo(5 / 12, 4);
   });
+
+  // ─── Additional boundary checks (final hardening pass) ─────────────
+  test('single-day range — exactly one row, correct day-cell totals', async () => {
+    const res = await request(app)
+      .get(`/reports/occupancy?from=2026-06-02&to=2026-06-02&propertyId=${PROP_ID}&groupBy=day`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const rows = res.body as any[];
+    expect(rows.length).toBe(1);
+    expect(rows[0].period).toBe('2026-06-02');
+    expect(Number(rows[0].available_room_nights)).toBe(4);
+    expect(Number(rows[0].occupied_room_nights)).toBe(2);
+    expect(Number(rows[0].occupancy_rate)).toBeCloseTo(0.5, 4);
+  });
+
+  test('zero-denominator: ADR for a period with NO occupied rooms returns null adr_cents', async () => {
+    // 2026-12-01 — no reservations cover that night → SUM(occupied)=0
+    // → adr_cents = SUM(rev)/NULLIF(0,0) = NULL. Must NOT throw and
+    // must NOT divide by zero.
+    const res = await request(app)
+      .get(`/reports/adr?from=2026-12-01&to=2026-12-01&propertyId=${PROP_ID}&groupBy=day`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const row = (res.body as any[])[0];
+    expect(Number(row.occupied_room_nights)).toBe(0);
+    expect(row.adr_cents).toBeNull();
+  });
+
+  test('zero-denominator: RevPAR with rooms-but-no-revenue returns 0 revpar_cents', async () => {
+    // Available = 4, occupied = 0, revenue = 0 → RevPAR = 0/4 = 0.
+    // The NULLIF guard only fires when *available* is zero; when
+    // available is non-zero and revenue is zero, the divide is
+    // legal and yields 0.
+    const res = await request(app)
+      .get(`/reports/revpar?from=2026-12-01&to=2026-12-01&propertyId=${PROP_ID}&groupBy=day`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const row = (res.body as any[])[0];
+    expect(Number(row.available_room_nights)).toBe(4);
+    expect(Number(row.revenue_cents)).toBe(0);
+    expect(Number(row.revpar_cents)).toBe(0);
+  });
+
+  test('empty period — range with no reservation activity has zeros, not error', async () => {
+    // Whole month with no reservations → 30 nights × 4 rooms = 120
+    // available room-nights, 0 occupied, 0 revenue. Must not throw.
+    const res = await request(app)
+      .get(`/reports/occupancy?from=2026-12-01&to=2026-12-30&propertyId=${PROP_ID}&groupBy=month`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const rows = res.body as any[];
+    expect(rows.length).toBe(1);
+    expect(Number(rows[0].available_room_nights)).toBe(120);
+    expect(Number(rows[0].occupied_room_nights)).toBe(0);
+    expect(Number(rows[0].occupancy_rate)).toBe(0);
+  });
+
+  test('SQL injection via propertyId is neutralized by parameterization', async () => {
+    // The KPI query is fully parameterized; passing a malicious string
+    // as propertyId returns an empty result set (no match), not an
+    // error and not data leakage from other properties.
+    const res = await request(app)
+      .get("/reports/occupancy?from=2026-06-01&to=2026-06-03&propertyId=' OR 1=1 --")
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    // No rooms match the propertyId, so available is 0 across all
+    // nights. The query returns rows but available_rooms = 0.
+    for (const row of res.body as any[]) {
+      expect(Number(row.available_room_nights)).toBe(0);
+    }
+  });
 });

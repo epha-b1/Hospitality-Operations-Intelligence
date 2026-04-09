@@ -20,7 +20,7 @@
  *      worker exits cleanly.
  *
  * If the worker-exit warning ever recurs, run with `--detectOpenHandles`
- * to get a stack trace — see `docs/final-acceptance-hardening.md`.
+ * to find the leaking resource.
  */
 import { logger } from '../src/utils/logger';
 

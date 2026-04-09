@@ -1108,7 +1108,7 @@ paths:
     get:
       tags: [Import]
       summary: Download Excel template for dataset type
-      security: []
+      description: Requires authentication and either hotel_admin or manager role.
       parameters:
         - in: path
           name: datasetType
@@ -1119,6 +1119,10 @@ paths:
       responses:
         "200":
           description: Excel template file
+        "401":
+          description: Unauthenticated
+        "403":
+          description: Forbidden — requires hotel_admin or manager role
 
   /import/upload:
     post:

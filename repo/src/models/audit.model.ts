@@ -36,7 +36,7 @@ AuditLog.init({
 //      raw SQL executed through the same credential cannot mutate
 //      historical rows.
 //
-//   3) Production DB role grants (documented in docs/audit-immutability.md)
+//   3) Production DB role grants — see scripts/audit-immutability.sql.
 //      REVOKE UPDATE and DELETE from the application user on audit_logs,
 //      leaving only a dedicated maintenance role able to run the archival
 //      job.
