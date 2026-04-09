@@ -3,10 +3,16 @@ dist/
 .env
 uploads/*
 exports/*
+# face-templates/ stores encrypted biometric material written at
+# runtime (see src/services/face.service.ts). These files MUST NEVER
+# be committed. Belt + braces: ignore everything in the directory
+# except the .gitkeep sentinel, and additionally ignore any stray
+# `.enc` file anywhere in the tree.
 face-templates/*
 !uploads/.gitkeep
 !exports/.gitkeep
 !face-templates/.gitkeep
+*.enc
 
 # Import staging area — raw validated rows live here until commitBatch
 # moves them into the DB. Never commit these and never reuse another

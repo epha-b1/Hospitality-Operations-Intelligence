@@ -58,6 +58,37 @@ describeDb('Slice 9 — Import API', () => {
     expect(res.status).toBe(200);
   });
 
+  // ─── Error contract: invalid datasetType must go through AppError ─
+  // Previously the controller passed a plain `{statusCode, code, message}`
+  // object to `next(...)`, which bypassed the AppError branch of the
+  // global error handler and fell through to the generic 500. The fix
+  // throws AppError, which the handler maps to 400 + VALIDATION_ERROR.
+  test('GET /import/templates/bogus 400 — invalid datasetType returns VALIDATION_ERROR', async () => {
+    const res = await request(app).get('/import/templates/bogus')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+    expect(res.body.message).toMatch(/dataset type/i);
+  });
+
+  test('POST /import/upload 400 — invalid datasetType returns VALIDATION_ERROR', async () => {
+    const buf = await createTestExcel(['x'], [['y']]);
+    const res = await request(app).post('/import/upload')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .field('datasetType', 'bogus')
+      .attach('file', buf, 'bad.xlsx');
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  test('POST /import/upload 400 — missing file returns VALIDATION_ERROR', async () => {
+    const res = await request(app).post('/import/upload')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .field('datasetType', 'staffing');
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
   test('POST /import/upload 200 — valid staffing file', async () => {
     const buf = await createTestExcel(
       ['employee_id', 'effective_date', 'position', 'department'],

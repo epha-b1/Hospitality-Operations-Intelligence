@@ -46,14 +46,14 @@ export async function occupancy(req: AuthenticatedRequest, res: Response, next: 
 export async function adr(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const scope = getManagerScope(req);
-    res.json(await reportingService.adr({ propertyId: req.query.propertyId as string, from: req.query.from as string, to: req.query.to as string, groupBy: req.query.groupBy as string }, scope));
+    res.json(await reportingService.adr({ propertyId: req.query.propertyId as string, from: req.query.from as string, to: req.query.to as string, groupBy: req.query.groupBy as string, roomType: req.query.roomType as string }, scope));
   } catch (e) { next(e); }
 }
 
 export async function revpar(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const scope = getManagerScope(req);
-    res.json(await reportingService.revpar({ propertyId: req.query.propertyId as string, from: req.query.from as string, to: req.query.to as string, groupBy: req.query.groupBy as string }, scope));
+    res.json(await reportingService.revpar({ propertyId: req.query.propertyId as string, from: req.query.from as string, to: req.query.to as string, groupBy: req.query.groupBy as string, roomType: req.query.roomType as string }, scope));
   } catch (e) { next(e); }
 }
 
