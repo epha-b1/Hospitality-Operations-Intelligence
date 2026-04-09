@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 let adminToken: string;
 let memberToken: string;
@@ -8,22 +9,22 @@ let memberId: string;
 let groupId: string;
 let joinCode: string;
 
-beforeAll(async () => {
-  await sequelize.authenticate();
+describeDb('Slice 4 — Groups API', () => {
+  beforeAll(async () => {
+    await sequelize.authenticate();
 
-  const adminRes = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
-  adminToken = adminRes.body.accessToken;
+    const adminRes = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
+    adminToken = adminRes.body.accessToken;
 
-  const memberRes = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
-  memberToken = memberRes.body.accessToken;
-  memberId = memberRes.body.user.id;
-});
+    const memberRes = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
+    memberToken = memberRes.body.accessToken;
+    memberId = memberRes.body.user.id;
+  });
 
-afterAll(async () => {
-  await sequelize.close();
-});
+  afterAll(async () => {
+    await sequelize.close();
+  });
 
-describe('Slice 4 — Groups API', () => {
   describe('POST /groups', () => {
     test('201 — creates group with join code', async () => {
       const res = await request(app)

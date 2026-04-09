@@ -1,26 +1,27 @@
 import request from 'supertest';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 let adminToken: string;
 let memberToken: string;
 let groupId: string;
 
-beforeAll(async () => {
-  await sequelize.authenticate();
-  const a = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
-  adminToken = a.body.accessToken;
-  const m = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
-  memberToken = m.body.accessToken;
+describeDb('Slice 7 — Notifications API', () => {
+  beforeAll(async () => {
+    await sequelize.authenticate();
+    const a = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
+    adminToken = a.body.accessToken;
+    const m = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
+    memberToken = m.body.accessToken;
 
-  const g = await request(app).post('/groups').set('Authorization', `Bearer ${adminToken}`).send({ name: 'Notif Test Group' });
-  groupId = g.body.id;
-  await request(app).post('/groups/join').set('Authorization', `Bearer ${memberToken}`).send({ joinCode: g.body.join_code });
-});
+    const g = await request(app).post('/groups').set('Authorization', `Bearer ${adminToken}`).send({ name: 'Notif Test Group' });
+    groupId = g.body.id;
+    await request(app).post('/groups/join').set('Authorization', `Bearer ${memberToken}`).send({ joinCode: g.body.join_code });
+  });
 
-afterAll(async () => { await sequelize.close(); });
+  afterAll(async () => { await sequelize.close(); });
 
-describe('Slice 7 — Notifications API', () => {
   test('GET /notifications — returns cursor-paginated notifications', async () => {
     const res = await request(app).get(`/notifications?groupId=${groupId}`).set('Authorization', `Bearer ${memberToken}`);
     expect(res.status).toBe(200);

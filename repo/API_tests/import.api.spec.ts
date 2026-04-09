@@ -2,14 +2,9 @@ import request from 'supertest';
 import ExcelJS from 'exceljs';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 let adminToken: string;
-
-beforeAll(async () => {
-  await sequelize.authenticate();
-  adminToken = (await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' })).body.accessToken;
-});
-afterAll(async () => { await sequelize.close(); });
 
 async function createTestExcel(columns: string[], rows: string[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -19,7 +14,13 @@ async function createTestExcel(columns: string[], rows: string[][]): Promise<Buf
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-describe('Slice 9 — Import API', () => {
+describeDb('Slice 9 — Import API', () => {
+  beforeAll(async () => {
+    await sequelize.authenticate();
+    adminToken = (await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' })).body.accessToken;
+  });
+  afterAll(async () => { await sequelize.close(); });
+
   test('GET /import/templates/staffing 200 — downloads template', async () => {
     const res = await request(app).get('/import/templates/staffing');
     expect(res.status).toBe(200);

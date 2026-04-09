@@ -1,22 +1,23 @@
 import request from 'supertest';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 // These tests require a running MySQL database (run inside Docker)
 const TEST_USER = { username: `testuser_${Date.now()}`, password: 'TestPass1!xx' };
 
 let authToken: string;
 
-beforeAll(async () => {
-  // Wait for DB connection
-  await sequelize.authenticate();
-});
+describeDb('Slice 2 — Auth API', () => {
+  beforeAll(async () => {
+    // Wait for DB connection
+    await sequelize.authenticate();
+  });
 
-afterAll(async () => {
-  await sequelize.close();
-});
+  afterAll(async () => {
+    await sequelize.close();
+  });
 
-describe('Slice 2 — Auth API', () => {
   describe('POST /auth/register', () => {
     test('201 — creates user', async () => {
       const res = await request(app)
@@ -126,6 +127,58 @@ describe('Slice 2 — Auth API', () => {
         .send({ legalName: 'John Doe' });
       expect(res.status).toBe(200);
       expect(res.body.legal_name).toBe('John Doe');
+    });
+
+    test('200 — full US address payload', async () => {
+      const res = await request(app)
+        .patch('/accounts/me')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          addressLine1: '100 Main St',
+          city: 'Aspen',
+          state: 'CO',
+          zip: '81611',
+          preferredCurrency: 'USD',
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.state).toBe('CO');
+      expect(res.body.zip).toBe('81611');
+    });
+
+    test('400 — invalid US state code', async () => {
+      const res = await request(app)
+        .patch('/accounts/me')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ state: 'XX' });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    test('400 — invalid ZIP format', async () => {
+      const res = await request(app)
+        .patch('/accounts/me')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ zip: '1234' });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    test('400 — invalid ISO currency code', async () => {
+      const res = await request(app)
+        .patch('/accounts/me')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ preferredCurrency: 'dollars' });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    test('400 — unknown field is rejected (strict)', async () => {
+      const res = await request(app)
+        .patch('/accounts/me')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ role: 'hotel_admin' });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
     });
   });
 

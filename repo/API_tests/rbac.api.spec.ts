@@ -1,33 +1,34 @@
 import request from 'supertest';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 let adminToken: string;
 let memberToken: string;
 let memberUserId: string;
 
-beforeAll(async () => {
-  await sequelize.authenticate();
+describeDb('Slice 3 — RBAC API', () => {
+  beforeAll(async () => {
+    await sequelize.authenticate();
 
-  // Login as hotel_admin
-  const adminRes = await request(app)
-    .post('/auth/login')
-    .send({ username: 'admin', password: 'Admin1!pass' });
-  adminToken = adminRes.body.accessToken;
+    // Login as hotel_admin
+    const adminRes = await request(app)
+      .post('/auth/login')
+      .send({ username: 'admin', password: 'Admin1!pass' });
+    adminToken = adminRes.body.accessToken;
 
-  // Login as member
-  const memberRes = await request(app)
-    .post('/auth/login')
-    .send({ username: 'member1', password: 'Member1!pass' });
-  memberToken = memberRes.body.accessToken;
-  memberUserId = memberRes.body.user.id;
-});
+    // Login as member
+    const memberRes = await request(app)
+      .post('/auth/login')
+      .send({ username: 'member1', password: 'Member1!pass' });
+    memberToken = memberRes.body.accessToken;
+    memberUserId = memberRes.body.user.id;
+  });
 
-afterAll(async () => {
-  await sequelize.close();
-});
+  afterAll(async () => {
+    await sequelize.close();
+  });
 
-describe('Slice 3 — RBAC API', () => {
   describe('GET /users', () => {
     test('200 as hotel_admin — returns user list with pagination', async () => {
       const res = await request(app)

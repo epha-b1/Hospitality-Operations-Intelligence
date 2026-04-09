@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 let adminToken: string;
 let memberToken: string;
@@ -9,22 +10,22 @@ let itemId: string;
 let checkpointId: string;
 const RUN_ID = Date.now();
 
-beforeAll(async () => {
-  await sequelize.authenticate();
-  const a = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
-  adminToken = a.body.accessToken;
-  const m = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
-  memberToken = m.body.accessToken;
+describeDb('Slice 5 — Itineraries API', () => {
+  beforeAll(async () => {
+    await sequelize.authenticate();
+    const a = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
+    adminToken = a.body.accessToken;
+    const m = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
+    memberToken = m.body.accessToken;
 
-  // Create a group and have member join
-  const g = await request(app).post('/groups').set('Authorization', `Bearer ${adminToken}`).send({ name: 'Itin Test Group' });
-  groupId = g.body.id;
-  await request(app).post('/groups/join').set('Authorization', `Bearer ${memberToken}`).send({ joinCode: g.body.join_code });
-});
+    // Create a group and have member join
+    const g = await request(app).post('/groups').set('Authorization', `Bearer ${adminToken}`).send({ name: 'Itin Test Group' });
+    groupId = g.body.id;
+    await request(app).post('/groups/join').set('Authorization', `Bearer ${memberToken}`).send({ joinCode: g.body.join_code });
+  });
 
-afterAll(async () => { await sequelize.close(); });
+  afterAll(async () => { await sequelize.close(); });
 
-describe('Slice 5 — Itineraries API', () => {
   test('POST create item 201', async () => {
     const res = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
       .send({ title: 'Morning Hike', meetupDate: '12/25/2025', meetupTime: '9:30 AM', meetupLocation: 'Lobby', notes: 'Bring water', idempotencyKey: `itin-create-${RUN_ID}` });

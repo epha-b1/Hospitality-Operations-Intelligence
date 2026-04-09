@@ -1,4 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
 import ExcelJS from 'exceljs';
 import { QueryTypes } from 'sequelize';
 import { ImportBatch, ImportError, StaffingRecord, EvaluationRecord } from '../models/import.model';
@@ -7,6 +9,32 @@ import { sequelize } from '../config/database';
 import { traceStore, createCategoryLogger } from '../utils/logger';
 
 const logger = createCategoryLogger('import');
+
+// Dedicated staging directory for validated-but-not-yet-committed import
+// rows. This directory MUST be isolated from exports/ so that temp
+// artifacts (which may contain PII) never leak into the download path.
+// The directory is auto-created on first use and all files written here
+// follow the `.import-<batchId>.json` naming convention.
+const IMPORT_TMP_DIR = path.resolve('var/import-tmp');
+
+function ensureTmpDir(): void {
+  if (!fs.existsSync(IMPORT_TMP_DIR)) fs.mkdirSync(IMPORT_TMP_DIR, { recursive: true });
+}
+
+function tmpFilePath(batchId: string): string {
+  // Accept only UUID-shaped batch ids to defeat path traversal. The caller
+  // always supplies a uuidv4 from crypto, but a defensive check here keeps
+  // the boundary explicit.
+  if (!/^[0-9a-fA-F-]{36}$/.test(batchId)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid batch id');
+  }
+  const full = path.resolve(IMPORT_TMP_DIR, `.import-${batchId}.json`);
+  // Enforce directory containment — resolved path must start with the tmp dir.
+  if (!full.startsWith(IMPORT_TMP_DIR + path.sep)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid batch id');
+  }
+  return full;
+}
 
 const STAFFING_COLUMNS = ['employee_id', 'effective_date', 'position', 'department', 'property_id', 'signed_off_by'];
 const STAFFING_REQUIRED = ['employee_id', 'effective_date', 'position'];
@@ -78,16 +106,12 @@ export async function uploadAndValidate(userId: string, datasetType: string, buf
     success_rows: validRows.length, status: 'pending',
   }, { where: { id: batchId } });
 
-  // Store parsed valid rows in a temp table approach — we use import_errors with a special marker
-  // Actually, store them serialized. Simpler: re-attach to batch via a data column.
-  // For production grade, we store the valid rows in a JSON blob on the batch.
-  // Since ImportBatch doesn't have a data column, we store in a temp file.
+  // Stage validated rows to the isolated import-tmp dir for the commit phase.
+  // Files live under var/import-tmp only — never exports/ — so raw PII
+  // cannot leak through the download endpoint.
   if (validRows.length > 0) {
-    const fs = require('fs');
-    const pathMod = require('path');
-    const tmpDir = pathMod.resolve('var/import-tmp');
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    fs.writeFileSync(pathMod.resolve(tmpDir, `.import-${batchId}.json`), JSON.stringify({ datasetType, validRows }));
+    ensureTmpDir();
+    fs.writeFileSync(tmpFilePath(batchId), JSON.stringify({ datasetType, validRows }));
   }
 
   return { batchId, totalRows, validRows: validRows.length, errorRows: errors.length, errors };
@@ -100,9 +124,7 @@ export async function commitBatch(batchId: string, userId: string) {
   if (batch.status === 'completed') throw new AppError(409, 'CONFLICT', 'Already committed');
   if (batch.status === 'failed') throw new AppError(409, 'CONFLICT', 'Batch failed');
 
-  const fs = require('fs');
-  const pathMod = require('path');
-  const dataPath = pathMod.resolve(`var/import-tmp/.import-${batchId}.json`);
+  const dataPath = tmpFilePath(batchId);
 
   let datasetType: string;
   let validRows: Record<string, string>[];
@@ -190,6 +212,8 @@ export async function commitBatch(batchId: string, userId: string) {
       await t.rollback();
       if (attempt >= MAX_RETRY_ATTEMPTS) {
         await ImportBatch.update({ status: 'failed' }, { where: { id: batchId } });
+        // Delete the staged temp file even on failure so PII does not linger.
+        try { fs.unlinkSync(dataPath); } catch { /* already gone */ }
         logger.error('Import batch failed after max retries', { batchId, attempt });
         throw err;
       }
@@ -205,6 +229,31 @@ export async function getBatch(batchId: string, userId: string) {
   if (!batch) throw new AppError(404, 'NOT_FOUND', 'Batch not found');
   if (batch.user_id !== userId) throw new AppError(403, 'FORBIDDEN', 'Not authorized for this batch');
   return batch;
+}
+
+/**
+ * Remove stale import temp files that were written but never committed.
+ * A file is stale when its mtime is older than `maxAgeMs` (default 24h).
+ * Returns the number of files deleted. Safe to call with a missing tmp dir.
+ */
+export function cleanupStaleImportTmp(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
+  if (!fs.existsSync(IMPORT_TMP_DIR)) return 0;
+  const cutoff = Date.now() - maxAgeMs;
+  let deleted = 0;
+  for (const name of fs.readdirSync(IMPORT_TMP_DIR)) {
+    // Only touch files that match the batch temp pattern — never other
+    // files that may land here by accident.
+    if (!name.startsWith('.import-') || !name.endsWith('.json')) continue;
+    const full = path.join(IMPORT_TMP_DIR, name);
+    try {
+      const stat = fs.statSync(full);
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(full);
+        deleted++;
+      }
+    } catch { /* already gone */ }
+  }
+  return deleted;
 }
 
 export async function staffingReport(params: { propertyId?: string; from?: string; to?: string }) {
@@ -223,8 +272,21 @@ export async function staffingReport(params: { propertyId?: string; from?: strin
 }
 
 export async function evaluationReport(params: { propertyId?: string; from?: string; to?: string }) {
+  // Evaluation records do not carry property_id directly; the property an
+  // employee belongs to is derived from their staffing records. When a
+  // property scope is supplied (manager path or explicit propertyId query
+  // parameter), we filter evaluations down to employees who have at least
+  // one staffing row on that property. This mirrors the strictness of
+  // staffingReport's property filter and closes the manager isolation gap
+  // reported in the static audit.
   const clauses: string[] = [];
-  const replacements: string[] = [];
+  const replacements: (string | number)[] = [];
+  if (params.propertyId) {
+    clauses.push(
+      'EXISTS (SELECT 1 FROM staffing_records s WHERE s.employee_id = e.employee_id AND s.property_id = ?)'
+    );
+    replacements.push(params.propertyId);
+  }
   if (params.from) { clauses.push('e.effective_date >= ?'); replacements.push(params.from); }
   if (params.to) { clauses.push('e.effective_date <= ?'); replacements.push(params.to); }
   const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';

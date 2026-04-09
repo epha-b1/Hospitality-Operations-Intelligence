@@ -7,3 +7,9 @@ face-templates/*
 !uploads/.gitkeep
 !exports/.gitkeep
 !face-templates/.gitkeep
+
+# Import staging area — raw validated rows live here until commitBatch
+# moves them into the DB. Never commit these and never reuse another
+# directory (e.g. exports/) for them. See src/services/import.service.ts.
+var/
+!var/.gitkeep

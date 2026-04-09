@@ -1,17 +1,18 @@
 import request from 'supertest';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 let memberToken: string;
 let sessionId: string;
 
-beforeAll(async () => {
-  await sequelize.authenticate();
-  memberToken = (await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' })).body.accessToken;
-});
-afterAll(async () => { await sequelize.close(); });
+describeDb('Slice 10 — Face Enrollment API', () => {
+  beforeAll(async () => {
+    await sequelize.authenticate();
+    memberToken = (await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' })).body.accessToken;
+  });
+  afterAll(async () => { await sequelize.close(); });
 
-describe('Slice 10 — Face Enrollment API', () => {
   test('POST /face/enroll/start 201 — creates session', async () => {
     const res = await request(app).post('/face/enroll/start').set('Authorization', `Bearer ${memberToken}`);
     expect(res.status).toBe(201);

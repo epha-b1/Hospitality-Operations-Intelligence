@@ -54,3 +54,52 @@ export const reportExportSchema = z.object({
   propertyId: z.string().optional(),
   includePii: z.boolean().optional(),
 });
+
+// --- Account profile (/accounts/me) ---------------------------------------
+// The prompt frames users as US-based customers; we enforce:
+//   * state   — 2-letter uppercase US state / territory code
+//   * zip     — US ZIP (5 digits) or ZIP+4 (5-4)
+//   * currency— ISO 4217 3-letter uppercase code
+// Field length bounds mirror the DB column lengths in users model so rejecting
+// at the edge prevents silent truncation later.
+
+const US_STATE_CODES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+  'VA','WA','WV','WI','WY',
+  // US territories and DC
+  'DC','AS','GU','MP','PR','VI',
+] as const;
+
+const US_ZIP_REGEX = /^\d{5}(-\d{4})?$/;
+const CURRENCY_REGEX = /^[A-Z]{3}$/;
+
+export const updateProfileSchema = z
+  .object({
+    legalName: z.string().trim().min(1).max(255).optional(),
+    addressLine1: z.string().trim().min(1).max(255).optional(),
+    addressLine2: z.string().trim().max(255).optional(),
+    city: z.string().trim().min(1).max(100).optional(),
+    state: z
+      .string()
+      .trim()
+      .length(2, 'state must be a 2-letter US state code')
+      .regex(/^[A-Z]{2}$/, 'state must be uppercase 2-letter US state code')
+      .refine((s) => (US_STATE_CODES as readonly string[]).includes(s), {
+        message: 'state must be a valid US state/territory code',
+      })
+      .optional(),
+    zip: z
+      .string()
+      .trim()
+      .regex(US_ZIP_REGEX, 'zip must be a US ZIP (12345) or ZIP+4 (12345-6789)')
+      .optional(),
+    taxInvoiceTitle: z.string().trim().max(255).optional(),
+    preferredCurrency: z
+      .string()
+      .trim()
+      .regex(CURRENCY_REGEX, 'preferredCurrency must be a 3-letter ISO 4217 code (e.g. USD, EUR)')
+      .optional(),
+  })
+  .strict();

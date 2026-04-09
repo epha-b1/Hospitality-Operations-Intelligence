@@ -43,7 +43,9 @@ app.get('/health', (_req: Request, res: Response) => {
 // Swagger UI
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
-// Rate limiting — general per-user applied after auth middleware populates user
+// Rate limiting — global IP-based safety net. Per-user quotas are applied
+// inside each protected router AFTER auth middleware populates req.user
+// (see middleware/rate-limit.middleware.ts:userLimiter).
 app.use(generalLimiter);
 
 // API routes

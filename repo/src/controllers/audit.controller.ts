@@ -2,18 +2,39 @@ import { Response, NextFunction } from 'express';
 import { Op, WhereOptions } from 'sequelize';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { AuditLog } from '../models/audit.model';
+import { maskSensitiveDeep } from '../utils/masking';
+import { objectsToCsv } from '../utils/csv';
 
-const SENSITIVE_FIELDS = ['password', 'password_hash', 'token', 'accessToken', 'encryption_key', 'secret'];
-
-function maskSensitive(obj: unknown): unknown {
-  if (!obj || typeof obj !== 'object') return obj;
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-    if (SENSITIVE_FIELDS.some(f => k.toLowerCase().includes(f))) result[k] = '[REDACTED]';
-    else result[k] = v;
-  }
-  return result;
+/**
+ * Single source of truth for rendering an AuditLog row to any audience.
+ *
+ * Every audit output path — JSON query, CSV export, future formats —
+ * MUST go through this function so the masking policy cannot drift
+ * between surfaces. Directly calling `row.toJSON()` for audit output
+ * is a bug; call `serializeAuditRow(row)` instead.
+ *
+ * Input is the model instance (or any object with a compatible shape);
+ * output is a plain object with `detail` deep-masked.
+ */
+export function serializeAuditRow(row: AuditLog): Record<string, unknown> {
+  const json = row.toJSON() as Record<string, unknown>;
+  json.detail = maskSensitiveDeep((row as any).detail ?? json.detail);
+  return json;
 }
+
+// Column order for CSV export — extracted so tests can assert the schema
+// does not drift, and so masking is applied before serialization.
+export const AUDIT_CSV_COLUMNS = [
+  'id',
+  'actor_id',
+  'action',
+  'resource_type',
+  'resource_id',
+  'trace_id',
+  'ip_address',
+  'created_at',
+  'detail',
+] as const;
 
 function buildDateFilter(from?: string, to?: string): Record<symbol, unknown> | undefined {
   if (!from && !to) return undefined;
@@ -37,7 +58,7 @@ export async function queryLogs(req: AuthenticatedRequest, res: Response, next: 
     const { count, rows } = await AuditLog.findAndCountAll({ where, order: [['created_at', 'DESC']], limit, offset: (page - 1) * limit });
 
     res.json({
-      data: rows.map(r => ({ ...r.toJSON(), detail: maskSensitive(r.detail) })),
+      data: rows.map(serializeAuditRow),
       pagination: { page, limit, total: count, totalPages: Math.ceil(count / limit) },
     });
   } catch (e) { next(e); }
@@ -50,9 +71,16 @@ export async function exportLogs(req: AuthenticatedRequest, res: Response, next:
     if (dateFilter) (where as any).created_at = dateFilter;
 
     const rows = await AuditLog.findAll({ where, order: [['created_at', 'DESC']] });
-    const header = 'id,actor_id,action,resource_type,resource_id,trace_id,ip_address,created_at\n';
-    const csv = rows.map(r => `${r.id},${r.actor_id || ''},${r.action},${r.resource_type || ''},${r.resource_id || ''},${r.trace_id || ''},${r.ip_address || ''},${r.created_at}`).join('\n');
+
+    // Deep-mask each row's detail JSON before it hits the wire. Export MUST
+    // apply the same default masking policy as the query endpoint — a CSV
+    // consumer should never see secrets that the JSON endpoint would hide.
+    // Routing through serializeAuditRow guarantees this cannot drift.
+    const serialized = rows.map(serializeAuditRow);
+    const csv = objectsToCsv(serialized, [...AUDIT_CSV_COLUMNS]);
+
     res.setHeader('Content-Type', 'text/csv');
-    res.send(header + csv);
+    res.setHeader('Content-Disposition', 'attachment; filename="audit-logs.csv"');
+    res.send(csv);
   } catch (e) { next(e); }
 }

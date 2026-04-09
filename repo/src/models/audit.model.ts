@@ -1,5 +1,6 @@
 import { DataTypes, Model } from 'sequelize';
 import { sequelize } from '../config/database';
+import { AppError } from '../utils/errors';
 
 export class AuditLog extends Model {
   public id!: string; public actor_id!: string | null; public action!: string;
@@ -19,11 +20,39 @@ AuditLog.init({
   created_at: { type: DataTypes.DATE, allowNull: false },
 }, { sequelize, tableName: 'audit_logs', timestamps: false, underscored: true });
 
-// Enforce immutability at app level — no UPDATE or DELETE via Sequelize ORM.
-// The archive retention job uses raw SQL which bypasses these hooks intentionally.
-// This is the documented maintenance boundary: only raw SQL with elevated context
-// (the cron archive job) can remove rows older than 1 year.
-AuditLog.beforeUpdate(() => { throw new Error('Audit logs are immutable — UPDATE is not allowed'); });
-AuditLog.beforeDestroy(() => { throw new Error('Audit logs are immutable — DELETE is not allowed'); });
-AuditLog.beforeBulkUpdate(() => { throw new Error('Audit logs are immutable — bulk UPDATE is not allowed'); });
-AuditLog.beforeBulkDestroy(() => { throw new Error('Audit logs are immutable — bulk DELETE is not allowed'); });
+// ---------------------------------------------------------------------------
+// Immutability enforcement
+// ---------------------------------------------------------------------------
+// Three layers defend the "1-year immutable audit log" requirement:
+//
+//   1) Sequelize lifecycle hooks (below) reject every UPDATE/DELETE attempt
+//      that goes through the ORM, including bulk operations and instance
+//      methods (`save`, `update`, `destroy`). This is the "normal path"
+//      guarantee — any business code that accidentally calls an update or
+//      delete will fail loudly before SQL is ever emitted.
+//
+//   2) DB-level triggers installed by migration 017-audit-logs-immutability.js
+//      reject UPDATE and DELETE statements regardless of source, so even
+//      raw SQL executed through the same credential cannot mutate
+//      historical rows.
+//
+//   3) Production DB role grants (documented in docs/audit-immutability.md)
+//      REVOKE UPDATE and DELETE from the application user on audit_logs,
+//      leaving only a dedicated maintenance role able to run the archival
+//      job.
+//
+// Throwing AppError (not plain Error) lets the global error handler render
+// a structured 500 response rather than leaking a stack trace.
+
+const immutabilityError = (op: string): AppError =>
+  new AppError(500, 'AUDIT_IMMUTABLE', `Audit logs are immutable — ${op} is not allowed`);
+
+AuditLog.beforeUpdate(() => { throw immutabilityError('UPDATE'); });
+AuditLog.beforeDestroy(() => { throw immutabilityError('DELETE'); });
+AuditLog.beforeBulkUpdate(() => { throw immutabilityError('bulk UPDATE'); });
+AuditLog.beforeBulkDestroy(() => { throw immutabilityError('bulk DELETE'); });
+AuditLog.beforeSave((instance: AuditLog) => {
+  // A no-op save on an existing row would bypass beforeUpdate in some
+  // sequelize versions — defensively reject any save that is not a create.
+  if (!instance.isNewRecord) throw immutabilityError('SAVE');
+});

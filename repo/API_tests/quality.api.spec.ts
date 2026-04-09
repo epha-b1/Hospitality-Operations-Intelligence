@@ -1,19 +1,20 @@
 import request from 'supertest';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
+import { describeDb } from './db-guard';
 
 let adminToken: string;
 let memberToken: string;
 let checkId: string;
 
-beforeAll(async () => {
-  await sequelize.authenticate();
-  adminToken = (await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' })).body.accessToken;
-  memberToken = (await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' })).body.accessToken;
-});
-afterAll(async () => { await sequelize.close(); });
+describeDb('Slice 11 — Quality API', () => {
+  beforeAll(async () => {
+    await sequelize.authenticate();
+    adminToken = (await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' })).body.accessToken;
+    memberToken = (await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' })).body.accessToken;
+  });
+  afterAll(async () => { await sequelize.close(); });
 
-describe('Slice 11 — Quality API', () => {
   test('POST /quality/checks 201 — create check config', async () => {
     const res = await request(app).post('/quality/checks').set('Authorization', `Bearer ${adminToken}`)
       .send({ entityType: 'reservations', checkType: 'null_coverage', config: { threshold: 0.05 } });

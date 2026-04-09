@@ -9,6 +9,7 @@ import { AuditLog } from '../models/audit.model';
 import { ExportRecord } from '../models/export.model';
 import { AppError } from '../utils/errors';
 import { traceStore } from '../utils/logger';
+import { objectsToCsv } from '../utils/csv';
 
 function getManagerScope(req: AuthenticatedRequest): string | undefined {
   if (req.user!.role === 'manager') {
@@ -84,15 +85,17 @@ export async function exportReport(req: AuthenticatedRequest, res: Response, nex
       }
       await wb.xlsx.writeFile(filePath);
     } else {
-      // CSV
+      // CSV — route through objectsToCsv so every cell is properly quoted
+      // (commas / newlines / embedded quotes) and values that begin with
+      // formula-trigger characters (=, +, -, @) are neutralized against
+      // spreadsheet formula injection. See src/utils/csv.ts.
       filename = `report-${reportType}-${exportId}.csv`;
       filePath = path.resolve('exports', filename);
       if (rows.length === 0) {
         fs.writeFileSync(filePath, '');
       } else {
-        const headers = Object.keys(rows[0]).join(',');
-        const lines = rows.map(r => Object.values(r).join(','));
-        fs.writeFileSync(filePath, [headers, ...lines].join('\n'));
+        const columns = Object.keys(rows[0]);
+        fs.writeFileSync(filePath, objectsToCsv(rows, columns));
       }
     }
 

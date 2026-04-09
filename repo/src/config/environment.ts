@@ -10,6 +10,16 @@ export interface EnvironmentConfig {
     password: string;
     name: string;
   };
+  // Optional elevated credential for the audit-log archive job. When
+  // strict DB role grants are enabled in production (REVOKE DELETE from
+  // the app user), the archival job needs a credential that still has
+  // DELETE privileges on audit_logs. If unset, the archival job falls
+  // back to the main pool and relies on the trigger's 1-year window to
+  // enforce retention.
+  auditMaintainer: {
+    user: string | null;
+    password: string | null;
+  };
   jwtSecret: string;
   encryptionKey: string;
   jwtTtl: number;
@@ -30,6 +40,10 @@ function loadConfig(): EnvironmentConfig {
       user: process.env.DB_USER || 'hospitality',
       password: process.env.DB_PASSWORD || 'hospitality',
       name: process.env.DB_NAME || 'hospitality',
+    },
+    auditMaintainer: {
+      user: process.env.AUDIT_MAINTAINER_USER || null,
+      password: process.env.AUDIT_MAINTAINER_PASSWORD || null,
     },
     jwtSecret: process.env.JWT_SECRET || 'change_me_in_production',
     encryptionKey: process.env.ENCRYPTION_KEY || 'change_me_32_chars_minimum_here_x',

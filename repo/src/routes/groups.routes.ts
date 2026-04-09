@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import * as groupsController from '../controllers/groups.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { userLimiter } from '../middleware/rate-limit.middleware';
 import { validate } from '../middleware/validation.middleware';
 import { createGroupSchema, joinGroupSchema } from '../utils/validation';
 
 const router = Router();
 
 router.use(authMiddleware);
+router.use(userLimiter);
 
 router.post('/', validate(createGroupSchema), groupsController.createGroup);
 router.get('/', groupsController.listGroups);
