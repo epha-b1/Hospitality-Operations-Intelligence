@@ -1,6 +1,16 @@
 node_modules/
 dist/
 .env
+
+# Log files — both rotated production logs and ad-hoc test/debug logs
+# (e.g. .tmp-api.log produced when piping jest output to a file). These
+# must never be committed: they leak request traces, user agents, IP
+# addresses, and timing information that has no business in version
+# control. The pattern is intentionally broad so any new *.log file
+# anywhere in the tree is gitignored by default.
+*.log
+.tmp-*.log
+
 uploads/*
 exports/*
 # face-templates/ stores encrypted biometric material written at

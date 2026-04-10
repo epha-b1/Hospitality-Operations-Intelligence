@@ -140,6 +140,30 @@ describe('revenueMixQuerySchema', () => {
   test('rejects other groupBy values', () => {
     expect(() => revenueMixQuerySchema.parse({ from: '2026-06-01', to: '2026-06-30', groupBy: 'day' })).toThrow();
   });
+
+  // ─── period (time rollup) — newly added field ────────────────────
+  test('accepts optional period day/week/month', () => {
+    for (const p of ['day', 'week', 'month'] as const) {
+      expect(() => revenueMixQuerySchema.parse({ from: '2026-06-01', to: '2026-06-30', period: p })).not.toThrow();
+    }
+  });
+
+  test('absent period is allowed (no time rollup)', () => {
+    const parsed = revenueMixQuerySchema.parse({ from: '2026-06-01', to: '2026-06-30' }) as Record<string, unknown>;
+    expect(parsed.period).toBeUndefined();
+  });
+
+  test('rejects invalid period values', () => {
+    expect(() => revenueMixQuerySchema.parse({ from: '2026-06-01', to: '2026-06-30', period: 'year' })).toThrow();
+    expect(() => revenueMixQuerySchema.parse({ from: '2026-06-01', to: '2026-06-30', period: 'channel' })).toThrow();
+  });
+
+  test('period and groupBy can both be set (independent dimensions)', () => {
+    expect(() => revenueMixQuerySchema.parse({
+      from: '2026-06-01', to: '2026-06-30',
+      groupBy: 'room_type', period: 'month',
+    })).not.toThrow();
+  });
 });
 
 describe('reportExportSchema', () => {

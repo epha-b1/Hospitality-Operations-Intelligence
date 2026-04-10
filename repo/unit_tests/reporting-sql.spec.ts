@@ -7,7 +7,7 @@
  */
 
 import { sequelize } from '../src/config/database';
-import { occupancy, adr, revpar } from '../src/services/reporting.service';
+import { occupancy, adr, revpar, revenueMix } from '../src/services/reporting.service';
 
 describe('reporting service — SQL fragment shape', () => {
   beforeEach(() => {
@@ -182,6 +182,90 @@ describe('reporting service — SQL fragment shape', () => {
         expect(sql).toMatch(/per_night AS \(/);
         expect(sql).toMatch(/FROM per_night/);
       }
+    });
+  });
+
+  // ─── revenueMix — category dimension + optional time rollup ──────
+  describe('revenueMix', () => {
+    beforeEach(() => {
+      (sequelize.query as jest.Mock).mockReset().mockResolvedValue([]);
+    });
+
+    test('default (no period, no groupBy) → channel-only category, single row per category', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30' });
+      const sql = lastSql();
+      // Category column is res.channel by default
+      expect(sql).toMatch(/res\.channel AS category/);
+      // No period column emitted
+      expect(sql).not.toMatch(/AS period/);
+      // GROUP BY is just `category`
+      expect(sql).toMatch(/GROUP BY category\b/);
+    });
+
+    test('groupBy=room_type → category column is rm.room_type', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30', groupBy: 'room_type' });
+      const sql = lastSql();
+      expect(sql).toMatch(/rm\.room_type AS category/);
+      expect(sql).not.toMatch(/res\.channel AS category/);
+    });
+
+    test('period=day → adds period column with day format and groups by (period, category)', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30', period: 'day' });
+      const sql = lastSql();
+      // Period column present with the day rollup format
+      expect(sql).toMatch(/DATE_FORMAT\(night, '%Y-%m-%d'\) AS period/);
+      expect(sql).toMatch(/res\.channel AS category/);
+      // GROUP BY now covers BOTH dimensions
+      expect(sql).toMatch(/GROUP BY period, category/);
+      // ORDER BY leads with period for stable time series ordering
+      expect(sql).toMatch(/ORDER BY period, total_revenue DESC/);
+    });
+
+    test('period=week → ISO week format', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30', period: 'week' });
+      const sql = lastSql();
+      expect(sql).toMatch(/DATE_FORMAT\(night, '%x-W%v'\) AS period/);
+      expect(sql).toMatch(/GROUP BY period, category/);
+    });
+
+    test('period=month → YYYY-MM format', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30', period: 'month' });
+      const sql = lastSql();
+      expect(sql).toMatch(/DATE_FORMAT\(night, '%Y-%m'\) AS period/);
+      expect(sql).toMatch(/GROUP BY period, category/);
+    });
+
+    test('period + groupBy=room_type → both dimensions in SELECT and GROUP BY', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30', period: 'month', groupBy: 'room_type' });
+      const sql = lastSql();
+      expect(sql).toMatch(/DATE_FORMAT\(night, '%Y-%m'\) AS period/);
+      expect(sql).toMatch(/rm\.room_type AS category/);
+      expect(sql).toMatch(/GROUP BY period, category/);
+    });
+
+    test('uses non-cancelled status filter (consistency with KPI queries)', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30' });
+      const sql = lastSql();
+      expect(sql).toMatch(/res\.status IN \('confirmed','checked_in','checked_out'\)/);
+      expect(sql).toMatch(/rm\.status <> 'maintenance'/);
+    });
+
+    test('hostile period value is dropped (whitelist) — falls back to no rollup', async () => {
+      // Even if validation is bypassed, the service rejects unknown
+      // period values and emits the historical no-rollup query.
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30', period: "'; DROP TABLE rooms; --" } as any);
+      const sql = lastSql();
+      expect(sql).not.toContain('DROP TABLE');
+      expect(sql).not.toMatch(/AS period/);
+      expect(sql).toMatch(/GROUP BY category\b/);
+    });
+
+    test('propertyId is parameterized (no inline interpolation)', async () => {
+      await revenueMix({ from: '2026-06-01', to: '2026-06-30', propertyId: "p'-or-1=1", period: 'day' });
+      const sql = lastSql();
+      const reps = lastReplacements();
+      expect(sql).not.toContain("p'-or-1=1");
+      expect(reps).toContain("p'-or-1=1");
     });
   });
 });

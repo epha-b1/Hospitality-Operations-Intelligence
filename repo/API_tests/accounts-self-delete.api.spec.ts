@@ -54,6 +54,16 @@ async function register(suffix: string): Promise<TestActor> {
   if (reg.status !== 201) {
     throw new Error(`register failed: ${reg.status} ${JSON.stringify(reg.body)}`);
   }
+  // Self-registration always lands a user in the `member` role.
+  // Several tests below need this user to OWN groups so the cascade
+  // logic (owner-transfer / archive-on-no-admin) has something to act
+  // on, but the role policy now restricts POST /groups to
+  // hotel_admin / manager / analyst — members are itinerary-only per
+  // spec. Promote to hotel_admin via the model directly so the test
+  // user has the role required to be a group owner without depending
+  // on a separate admin promotion endpoint.
+  await User.update({ role: 'hotel_admin' }, { where: { id: reg.body.id } });
+  // Login AFTER the role bump so the token reflects the new role.
   const login = await request(app).post('/auth/login').send({ username, password: PASSWORD });
   if (login.status !== 200) {
     throw new Error(`login failed: ${login.status} ${JSON.stringify(login.body)}`);

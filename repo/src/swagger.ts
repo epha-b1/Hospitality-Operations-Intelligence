@@ -214,8 +214,8 @@ export const openApiSpec = {
       parameters: params(qStr('propertyId'), qDate('from', true), qDate('to', true), qStr('groupBy')),
       responses: ok(),
     }),
-    '/reports/revenue-mix': endpoint('get', 'Reports', 'Revenue mix by channel/room type', {
-      parameters: params(qStr('propertyId'), qDate('from', true), qDate('to', true), qStr('groupBy')),
+    '/reports/revenue-mix': endpoint('get', 'Reports', 'Revenue mix by channel/room type with optional time rollup', {
+      parameters: params(qStr('propertyId'), qDate('from', true), qDate('to', true), qStr('groupBy'), qStr('period')),
       responses: ok(),
     }),
     '/reports/export': endpoint('post', 'Reports', 'Export report as CSV or Excel', {

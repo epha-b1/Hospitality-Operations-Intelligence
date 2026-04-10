@@ -41,8 +41,32 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Swagger UI
+// Swagger UI — interactive API explorer.
+//
+// Mounted on TWO paths so reviewers and tooling can find it at the
+// conventional location regardless of which convention they use:
+//
+//   /docs       — short, human-friendly canonical path
+//   /api/docs   — historical path, kept for backward compatibility
+//
+// Both surfaces serve the same generated OpenAPI spec from
+// `src/swagger.ts`, plus a raw JSON dump at `/docs/openapi.json` and
+// `/api/docs/openapi.json` so codegen tools and clients (e.g.
+// swagger-codegen, oapi-codegen) can fetch the spec without scraping
+// the swagger-ui HTML.
+//
+// Order matters: the JSON endpoint MUST be registered BEFORE
+// `app.use('/docs', ...)` because swagger-ui-express mounts a
+// catch-all handler under its prefix that would otherwise return
+// HTML for `/docs/openapi.json`.
+app.get('/docs/openapi.json', (_req: Request, res: Response) => {
+  res.json(openApiSpec);
+});
+app.get('/api/docs/openapi.json', (_req: Request, res: Response) => {
+  res.json(openApiSpec);
+});
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
 // Rate limiting — global IP-based safety net. Per-user quotas are applied
 // inside each protected router AFTER auth middleware populates req.user

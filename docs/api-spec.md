@@ -1037,7 +1037,18 @@ paths:
   /reports/revenue-mix:
     get:
       tags: [Reports]
-      summary: Revenue mix by channel
+      summary: Revenue mix by category, with optional day/week/month time rollup
+      description: |
+        Returns revenue partitioned by a category dimension (channel or
+        room_type) and optionally rolled up to a time period.
+
+        - When `period` is omitted, the response is one row per
+          category for the entire `[from, to]` range — the historical
+          collapsed shape.
+        - When `period` is `day`, `week`, or `month`, the response is a
+          per-period × per-category time series; each row carries an
+          additional `period` field. Period semantics match
+          `/reports/{occupancy,adr,revpar}` exactly.
       parameters:
         - in: query
           name: propertyId
@@ -1058,10 +1069,19 @@ paths:
             format: date
         - in: query
           name: groupBy
+          description: Category dimension. Defaults to `channel` when omitted.
           schema:
             type: string
-            enum: [day, week, month, channel, room_type]
+            enum: [channel, room_type]
             default: channel
+        - in: query
+          name: period
+          description: |
+            Optional time-rollup dimension. Adds a `period` column to
+            each result row and groups by `(period, category)`.
+          schema:
+            type: string
+            enum: [day, week, month]
       responses:
         "200":
           description: Revenue mix breakdown

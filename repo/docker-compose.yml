@@ -1,3 +1,14 @@
+# Explicit project name pins this stack to its own Docker Compose
+# namespace. Without it, Compose derives the project name from the
+# parent directory (`repo`) and collides with any other project on the
+# host that also lives in a directory called `repo` — re-using its
+# containers, networks, volumes, and even its built image. This stack
+# uses `hospitality-ops` as the project name so its `<project>-<service>`
+# resources (`hospitality-ops-api-1`, `hospitality-ops-db-1`,
+# `hospitality-ops_default`, `hospitality-ops_mysqldata`) cannot be
+# confused with any other project on the same Docker host.
+name: hospitality-ops
+
 services:
   api:
     build: .

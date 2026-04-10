@@ -34,4 +34,39 @@ describe('Slice 1 — Health API', () => {
     expect(res.body.traceId).toBeDefined();
     expect(res.body.statusCode).toBe(404);
   });
+
+  // ─── OpenAPI / Swagger UI surface ────────────────────────────────
+  // The interactive API explorer is mounted on TWO paths so reviewers
+  // can find it at the conventional `/docs` location AND at the
+  // historical `/api/docs` path. Both must serve the swagger UI HTML
+  // shell, and `/docs/openapi.json` must serve the raw spec for
+  // tooling that consumes the OpenAPI document directly.
+  test('GET /docs serves swagger UI HTML (canonical short path)', async () => {
+    const res = await request(app).get('/docs/').redirects(1);
+    expect(res.status).toBe(200);
+    // swagger-ui-express ships an HTML shell that references swagger
+    // assets. The exact body changes between versions, so we assert
+    // on stable, version-agnostic markers.
+    expect(res.headers['content-type']).toMatch(/text\/html/);
+    expect(res.text).toMatch(/swagger/i);
+  });
+
+  test('GET /api/docs still serves swagger UI HTML (legacy path)', async () => {
+    const res = await request(app).get('/api/docs/').redirects(1);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/html/);
+    expect(res.text).toMatch(/swagger/i);
+  });
+
+  test('GET /docs/openapi.json returns the raw OpenAPI 3 spec', async () => {
+    const res = await request(app).get('/docs/openapi.json');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    // OpenAPI 3 documents declare openapi version, info, and paths.
+    expect(res.body.openapi).toMatch(/^3\./);
+    expect(res.body.info?.title).toBeDefined();
+    expect(typeof res.body.paths).toBe('object');
+    // Spot-check that a known path is present in the spec.
+    expect(res.body.paths['/health']).toBeDefined();
+  });
 });

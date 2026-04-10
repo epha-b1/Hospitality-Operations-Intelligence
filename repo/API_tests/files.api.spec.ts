@@ -4,6 +4,7 @@ import { sequelize } from '../src/config/database';
 import { describeDb } from './db-guard';
 
 let adminToken: string;
+let managerToken: string;
 let memberToken: string;
 let groupId: string;
 let fileId: string;
@@ -13,42 +14,70 @@ describeDb('Slice 6 — Files API', () => {
     await sequelize.authenticate();
     const a = await request(app).post('/auth/login').send({ username: 'admin', password: 'Admin1!pass' });
     adminToken = a.body.accessToken;
+    // manager1 is hotel staff with file-write access. The previous
+    // version of these tests used member1 as the uploader, but the
+    // role policy now restricts files to admin/manager/analyst —
+    // members are itinerary-only per the spec.
+    const mgr = await request(app).post('/auth/login').send({ username: 'manager1', password: 'Manager1!pass' });
+    managerToken = mgr.body.accessToken;
     const m = await request(app).post('/auth/login').send({ username: 'member1', password: 'Member1!pass' });
     memberToken = m.body.accessToken;
 
     const g = await request(app).post('/groups').set('Authorization', `Bearer ${adminToken}`).send({ name: 'File Test Group' });
     groupId = g.body.id;
-    await request(app).post('/groups/join').set('Authorization', `Bearer ${memberToken}`).send({ joinCode: g.body.join_code });
+    // The manager joins the group so they have group-membership scope
+    // for the upload/download flow that follows.
+    await request(app).post('/groups/join').set('Authorization', `Bearer ${managerToken}`).send({ joinCode: g.body.join_code });
   });
 
   afterAll(async () => { await sequelize.close(); });
 
-  test('POST upload 201 — valid file', async () => {
-    const res = await request(app).post(`/groups/${groupId}/files`).set('Authorization', `Bearer ${memberToken}`)
+  test('POST upload 201 — valid file (manager)', async () => {
+    const res = await request(app).post(`/groups/${groupId}/files`).set('Authorization', `Bearer ${managerToken}`)
       .attach('file', Buffer.from('hello world'), { filename: 'test.pdf', contentType: 'application/pdf' });
     expect(res.status).toBe(201);
     expect(res.body.original_name).toBe('test.pdf');
     fileId = res.body.id;
   });
 
-  test('POST upload 201 — dedup returns existing', async () => {
-    const res = await request(app).post(`/groups/${groupId}/files`).set('Authorization', `Bearer ${memberToken}`)
+  test('POST upload 201 — dedup returns existing (manager)', async () => {
+    const res = await request(app).post(`/groups/${groupId}/files`).set('Authorization', `Bearer ${managerToken}`)
       .attach('file', Buffer.from('hello world'), { filename: 'test2.pdf', contentType: 'application/pdf' });
     expect(res.status).toBe(201);
     expect(res.body.id).toBe(fileId);
   });
 
-  test('POST upload 400 — disallowed MIME', async () => {
-    const res = await request(app).post(`/groups/${groupId}/files`).set('Authorization', `Bearer ${memberToken}`)
+  test('POST upload 400 — disallowed MIME (manager)', async () => {
+    const res = await request(app).post(`/groups/${groupId}/files`).set('Authorization', `Bearer ${managerToken}`)
       .attach('file', Buffer.from('#!/bin/sh'), { filename: 'script.sh', contentType: 'application/x-sh' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('MIME_NOT_ALLOWED');
   });
 
-  test('GET list files 200', async () => {
-    const res = await request(app).get(`/groups/${groupId}/files`).set('Authorization', `Bearer ${memberToken}`);
+  test('GET list files 200 (manager)', async () => {
+    const res = await request(app).get(`/groups/${groupId}/files`).set('Authorization', `Bearer ${managerToken}`);
     expect(res.status).toBe(200);
     expect(res.body.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ─── Member role gate (itinerary-only policy) ─────────────────────
+  // members must be blocked at the route layer regardless of group
+  // membership. These four assertions enforce the spec-mandated
+  // "member is itinerary-only" rule for the files surface.
+  test('POST upload 403 — member is itinerary-only (no file write)', async () => {
+    const res = await request(app).post(`/groups/${groupId}/files`).set('Authorization', `Bearer ${memberToken}`)
+      .attach('file', Buffer.from('payload'), { filename: 'mfile.pdf', contentType: 'application/pdf' });
+    expect(res.status).toBe(403);
+  });
+
+  test('GET list files 403 — member blocked at route layer', async () => {
+    const res = await request(app).get(`/groups/${groupId}/files`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('GET file 403 — member cannot download', async () => {
+    const res = await request(app).get(`/groups/${groupId}/files/${fileId}`).set('Authorization', `Bearer ${memberToken}`);
+    expect(res.status).toBe(403);
   });
 
   test('DELETE file 403 — member cannot delete', async () => {

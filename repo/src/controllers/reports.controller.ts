@@ -60,7 +60,13 @@ export async function revpar(req: AuthenticatedRequest, res: Response, next: Nex
 export async function revenueMix(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const scope = getManagerScope(req);
-    res.json(await reportingService.revenueMix({ propertyId: req.query.propertyId as string, from: req.query.from as string, to: req.query.to as string, groupBy: req.query.groupBy as string }, scope));
+    res.json(await reportingService.revenueMix({
+      propertyId: req.query.propertyId as string,
+      from: req.query.from as string,
+      to: req.query.to as string,
+      groupBy: req.query.groupBy as string,
+      period: req.query.period as 'day' | 'week' | 'month' | undefined,
+    }, scope));
   } catch (e) { next(e); }
 }
 

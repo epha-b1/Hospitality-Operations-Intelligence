@@ -42,6 +42,13 @@ interface ReportParams {
   to: string;   // YYYY-MM-DD inclusive
   groupBy?: string;
   roomType?: string;
+  // Optional time-rollup applied to revenueMix on top of the category
+  // dimension (channel / room_type). Mirrors the day/week/month
+  // semantics used by occupancy / adr / revpar so callers get a
+  // consistent rollup vocabulary across all reports. When absent,
+  // revenueMix collapses to the historical behavior of one row per
+  // category for the entire date range.
+  period?: 'day' | 'week' | 'month';
 }
 
 const NON_CANCELLED_STATUSES = "('confirmed','checked_in','checked_out')";
@@ -170,6 +177,20 @@ export async function revpar(params: ReportParams, managerPropertyId?: string) {
  * Revenue mix: total revenue partitioned by either room_type or
  * channel. Uses the same per-night CTE so revenue numbers are
  * consistent with the room-night KPIs above (no double counting).
+ *
+ * Two grouping axes:
+ *   - `groupBy`  → category dimension: 'channel' (default) or 'room_type'.
+ *                  Whitelisted to prevent SQL injection.
+ *   - `period`   → optional time rollup: 'day' | 'week' | 'month'.
+ *                  When set, the result becomes a per-period × per-category
+ *                  series so callers can plot revenue mix over time. When
+ *                  absent, the result collapses to one row per category
+ *                  for the entire [from, to] range — the historical
+ *                  behavior, preserved for backward compatibility.
+ *
+ * Result shape:
+ *   period absent  → [{ category, total_revenue, room_nights }, ...]
+ *   period present → [{ period, category, total_revenue, room_nights }, ...]
  */
 export async function revenueMix(params: ReportParams, managerPropertyId?: string) {
   const propId = effectivePropertyId(params, managerPropertyId);
@@ -180,9 +201,22 @@ export async function revenueMix(params: ReportParams, managerPropertyId?: strin
   let scopeWhere = `res.status IN ${NON_CANCELLED_STATUSES} AND rm.status <> 'maintenance'`;
   if (propId) { scopeWhere += ' AND rm.property_id = ?'; replacements.push(propId); }
 
-  // groupBy defines the partition column. Allow only safe values to
-  // avoid SQL injection through `groupBy`.
+  // groupBy defines the category partition column. Whitelist values so
+  // user input never reaches the SQL string directly.
   const groupCol = params.groupBy === 'room_type' ? 'rm.room_type' : 'res.channel';
+
+  // Optional period dimension. The whitelist on `params.period` happens
+  // both at the validation layer (revenueMixQuerySchema) and here as
+  // defense in depth — `periodExpr` only emits hardcoded format
+  // strings, never user input.
+  const hasPeriod = params.period === 'day' || params.period === 'week' || params.period === 'month';
+  const periodCol = hasPeriod ? periodExpr(params.period) : null;
+
+  const selectClause = hasPeriod
+    ? `${periodCol} AS period, ${groupCol} AS category`
+    : `${groupCol} AS category`;
+  const groupByClause = hasPeriod ? 'period, category' : 'category';
+  const orderByClause = hasPeriod ? 'period, total_revenue DESC' : 'total_revenue DESC';
 
   const sql = `
     WITH RECURSIVE calendar (night) AS (
@@ -192,7 +226,7 @@ export async function revenueMix(params: ReportParams, managerPropertyId?: strin
       FROM calendar
       WHERE night < DATE(?)
     )
-    SELECT ${groupCol} AS category,
+    SELECT ${selectClause},
            SUM(res.rate_cents) AS total_revenue,
            COUNT(*) AS room_nights
     FROM calendar cal
@@ -202,8 +236,8 @@ export async function revenueMix(params: ReportParams, managerPropertyId?: strin
     JOIN rooms rm
       ON rm.id = res.room_id
     WHERE ${scopeWhere}
-    GROUP BY category
-    ORDER BY total_revenue DESC`;
+    GROUP BY ${groupByClause}
+    ORDER BY ${orderByClause}`;
 
   return sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
 }

@@ -44,6 +44,17 @@ describeDb('Slice 4 — Groups API', () => {
       const res = await request(app).post('/groups').send({ name: 'No Auth' });
       expect(res.status).toBe(401);
     });
+
+    test('403 — member is itinerary-only and cannot create groups', async () => {
+      // Strict prompt compliance: the `member` user role does not have
+      // group lifecycle privileges. The role gate on POST /groups
+      // blocks them at the route layer.
+      const res = await request(app)
+        .post('/groups')
+        .set('Authorization', `Bearer ${memberToken}`)
+        .send({ name: 'Member-attempted Group' });
+      expect(res.status).toBe(403);
+    });
   });
 
   describe('POST /groups/join', () => {

@@ -93,7 +93,13 @@ export const revenueMixQuerySchema = z
   .object({
     from: reportDate,
     to: reportDate,
+    // Category dimension — what each result row partitions on.
+    // Defaults to channel when omitted (matches historical behavior).
     groupBy: z.enum(['channel', 'room_type']).optional(),
+    // Optional time-rollup dimension. When set, the response is a
+    // per-period × per-category series; when omitted, results are
+    // collapsed to one row per category for the entire date range.
+    period: reportGroupBy.optional(),
     propertyId: propertyIdSchema.optional(),
   })
   .refine((v) => v.from <= v.to, {
