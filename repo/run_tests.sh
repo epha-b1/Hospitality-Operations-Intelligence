@@ -51,14 +51,14 @@ echo ""
 echo "=== Step 3: Running unit tests ==="
 
 UNIT_EXIT=0
-$COMPOSE exec -T api npx jest --testPathPattern=unit_tests --verbose --no-cache || UNIT_EXIT=$?
+$COMPOSE exec -T api npx jest --selectProjects=unit --verbose --no-cache || UNIT_EXIT=$?
 
 # ── Step 4: API tests ─────────────────────────────────────────────────────
 echo ""
 echo "=== Step 4: Running API tests ==="
 
 API_EXIT=0
-$COMPOSE exec -T api npx jest --testPathPattern=API_tests --verbose --no-cache --runInBand || API_EXIT=$?
+$COMPOSE exec -T api npx jest --selectProjects=api --verbose --no-cache --runInBand || API_EXIT=$?
 
 # ── Summary ───────────────────────────────────────────────────────────────
 echo ""

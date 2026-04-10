@@ -35,8 +35,15 @@ describeDb('Slice 5 — Itineraries API', () => {
   });
 
   test('POST create — idempotency returns same item', async () => {
+    // Resend the EXACT body (including `notes`) used by the first test
+    // above. The service's create-idempotency hash (see
+    // src/services/itinerary.service.ts::hashCreateBody) covers all
+    // user-visible fields, so dropping `notes` here would change the
+    // hash and the second call would be treated as a 409 conflict — a
+    // correct behavior, but not the replay semantic this test is
+    // asserting.
     const res = await request(app).post(`/groups/${groupId}/itineraries`).set('Authorization', `Bearer ${adminToken}`)
-      .send({ title: 'Morning Hike', meetupDate: '12/25/2025', meetupTime: '9:30 AM', meetupLocation: 'Lobby', idempotencyKey: `itin-create-${RUN_ID}` });
+      .send({ title: 'Morning Hike', meetupDate: '12/25/2025', meetupTime: '9:30 AM', meetupLocation: 'Lobby', notes: 'Bring water', idempotencyKey: `itin-create-${RUN_ID}` });
     expect(res.status).toBe(201);
     expect(res.body.id).toBe(itemId);
   });

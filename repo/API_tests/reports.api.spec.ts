@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import app from '../src/app';
 import { sequelize } from '../src/config/database';
 import { StaffingRecord, EvaluationRecord, ImportBatch } from '../src/models/import.model';
+import { User } from '../src/models/user.model';
 import { describeDb } from './db-guard';
 
 let adminToken: string;
@@ -32,9 +33,17 @@ describeDb('Slice 8 — Reports API', () => {
     // what each role can and cannot see, rather than weak cardinality
     // comparisons. Each batch is tagged with RUN_TAG to keep tests
     // independent across runs.
+    //
+    // `import_batches.user_id` is a FK to `users.id`, so we cannot use
+    // a string sentinel — resolve the seeded admin user's real id and
+    // use that for the fixture batch. The actual `user_id` value does
+    // not matter for the assertions below; only the per-batch staffing
+    // and evaluation rows (tagged with RUN_TAG) are inspected.
+    const adminUser = await User.findOne({ where: { username: 'admin' } });
+    if (!adminUser) throw new Error('admin seed user missing — cannot build isolation fixture');
     const batchId = uuidv4();
     await ImportBatch.create({
-      id: batchId, user_id: 'isolation-fixture', batch_type: 'staffing',
+      id: batchId, user_id: adminUser.id, batch_type: 'staffing',
       status: 'completed', trace_id: null, created_at: new Date(),
     });
 
